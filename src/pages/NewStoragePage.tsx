@@ -9,9 +9,13 @@ import {
   Info,
   ShieldCheck
 } from 'lucide-react';
+import { apiServices } from '@/lib/api';
+import type { CreateInput, StorageLocation, StorageType } from '@/types/api';
 
 export default function NewStoragePage() {
   const navigate = useNavigate();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     type: 'Dépôt Principal',
@@ -21,9 +25,36 @@ export default function NewStoragePage() {
     description: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const storageTypeMap: Record<string, StorageType> = {
+    'Dépôt Principal': 'depot_principal',
+    'Magasin Chantier': 'magasin_chantier',
+    'Zone Temporaire': 'zone_temporaire',
+    'Conteneur Mobile': 'conteneur_mobile',
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Saving new storage location:', formData);
+    setIsSubmitting(true);
+    setSubmitError(null);
+    const payload: CreateInput<StorageLocation> = {
+      name: formData.name,
+      storage_type: storageTypeMap[formData.type] ?? 'depot_principal',
+      address: formData.location,
+      manager_name: formData.manager,
+      manager_user: null,
+      capacity_m2: formData.capacity ? formData.capacity : null,
+      notes: formData.description,
+      is_active: true,
+    };
+    try {
+      await apiServices.storageLocations.create(payload);
+    } catch (error) {
+      console.error('Failed to save storage location:', error);
+      setSubmitError("Impossible d'enregistrer ce lieu pour le moment.");
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
     navigate('/storage');
   };
 
@@ -46,6 +77,11 @@ export default function NewStoragePage() {
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-6">
+          {submitError ? (
+            <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-3 text-sm text-error">
+              {submitError}
+            </div>
+          ) : null}
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-surface-container-high space-y-6">
             <div className="flex items-center gap-3 pb-4 border-b border-surface-dim/10">
               <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
@@ -149,10 +185,11 @@ export default function NewStoragePage() {
             </p>
             <button 
               type="submit"
+              disabled={isSubmitting}
               className="w-full py-4 bg-white text-primary font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-slate-100 transition-all active:scale-95 shadow-lg"
             >
               <ShieldCheck className="w-5 h-5" />
-              <span>Enregistrer le lieu</span>
+              <span>{isSubmitting ? 'Enregistrement...' : 'Enregistrer le lieu'}</span>
             </button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Download, 
   Upload, 
@@ -19,8 +19,10 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { apiServices } from '@/lib/api';
+import type { Item, StockBalance, StorageLocation } from '@/types/api';
 
-const inventory = [
+const mockInventory = [
   { ref: 'REF-09421', name: 'Bosch 18V - Perforateur', cat: 'Matériel', sub: 'Outillage électroportatif', location: 'Dépôt Cotonou', qty: 15, threshold: 5, status: 'Disponible', statusColor: 'text-green-700 bg-green-50 border-green-100', dotColor: 'bg-green-500', icon: Hammer, last: 'Il y a 2h' },
   { ref: 'REF-88210', name: 'Ciment CPJ 35', cat: 'Consommable', sub: 'Sac de 35kg - Lafarge', location: 'Dépôt Cotonou', qty: 2, threshold: 20, status: 'Stock faible', statusColor: 'text-orange-700 bg-orange-50 border-orange-100', dotColor: 'bg-orange-500', icon: PackageIcon, last: 'Hier, 16:45' },
   { ref: 'REF-11492', name: 'Peinture Glycéro Blanche', cat: 'Consommable', sub: 'Pot 10L - Tollens', location: 'Chantier Parakou', qty: 0, threshold: 5, status: 'Rupture', statusColor: 'text-red-700 bg-red-50 border-red-100', dotColor: 'bg-red-500', icon: Palette, last: '22 Oct. 2023' },
@@ -28,6 +30,28 @@ const inventory = [
 ];
 
 export default function InventoryPage() {
+  const [inventoryRows, setInventoryRows] = useState(mockInventory);
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([
+      apiServices.items.list(),
+      apiServices.stockBalances.list(),
+      apiServices.storageLocations.list(),
+    ])
+      .then(([items, balances, locations]) => {
+        if (!isMounted || items.length === 0) return;
+        const rows = buildInventoryRows(items, balances, locations);
+        setInventoryRows(rows.length > 0 ? rows : mockInventory);
+      })
+      .catch((error) => {
+        console.error('Failed to load inventory data:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   return (
     <div className="space-y-10">
       <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
@@ -105,7 +129,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-dim/10">
-              {inventory.map((item, i) => (
+              {inventoryRows.map((item, i) => (
                 <tr key={i} className="hover:bg-surface-container-low transition-colors duration-200 group">
                   <td className="px-6 py-5">
                     <span className="font-mono text-xs font-semibold text-slate-500">{item.ref}</span>
@@ -209,4 +233,51 @@ export default function InventoryPage() {
       </section>
     </div>
   );
+}
+
+function buildInventoryRows(
+  items: Item[],
+  balances: StockBalance[],
+  locations: StorageLocation[],
+) {
+  const locationNameById = new Map(locations.map((location) => [location.id, location.name]));
+  return items.map((item) => {
+    const itemBalances = balances.filter((balance) => balance.item === item.id);
+    const totalQty = itemBalances.reduce(
+      (sum, balance) => sum + Number(balance.quantity || 0),
+      0,
+    );
+    const firstLocation = itemBalances[0]
+      ? locationNameById.get(itemBalances[0].storage_location) ?? 'N/A'
+      : 'N/A';
+    const minStock = Number(item.min_stock || 0);
+    const status =
+      totalQty <= 0 ? 'Rupture' : totalQty <= minStock ? 'Stock faible' : 'Disponible';
+    const statusColor =
+      status === 'Rupture'
+        ? 'text-red-700 bg-red-50 border-red-100'
+        : status === 'Stock faible'
+          ? 'text-orange-700 bg-orange-50 border-orange-100'
+          : 'text-green-700 bg-green-50 border-green-100';
+    const dotColor =
+      status === 'Rupture'
+        ? 'bg-red-500'
+        : status === 'Stock faible'
+          ? 'bg-orange-500'
+          : 'bg-green-500';
+    return {
+      ref: item.sku,
+      name: item.name,
+      cat: item.subcategory_label || 'Article',
+      sub: item.description || 'Sans description',
+      location: firstLocation,
+      qty: totalQty,
+      threshold: minStock,
+      status,
+      statusColor,
+      dotColor,
+      icon: Hammer,
+      last: 'API',
+    };
+  });
 }

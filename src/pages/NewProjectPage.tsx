@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Rocket, 
@@ -18,9 +18,22 @@ import {
   Calendar
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiServices } from '@/lib/api';
+import type {
+  Agency,
+  CreateInput,
+  Project,
+  ProjectCriticality,
+  ProjectPriority,
+  ProjectTrackingMode,
+  ProjectType,
+} from '@/types/api';
 
 export default function NewProjectPage() {
   const navigate = useNavigate();
+  const [agencies, setAgencies] = useState<Agency[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: 'Résidence Les Alizés - Phase 2',
     reference: 'REF-2024-001',
@@ -41,9 +54,83 @@ export default function NewProjectPage() {
     trackingMode: 'progress'
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    let isMounted = true;
+    apiServices.agencies
+      .list()
+      .then((data) => {
+        if (!isMounted) return;
+        setAgencies(data);
+        if (data.length > 0 && !data.some((agency) => agency.name === formData.center)) {
+          setFormData((prev) => ({ ...prev, center: data[0].name }));
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load agencies:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const agencyByName = useMemo(() => {
+    return new Map(agencies.map((agency) => [agency.name, agency.id]));
+  }, [agencies]);
+
+  const projectTypeMap: Record<string, ProjectType> = {
+    'Résidentiel Collectif': 'residentiel_collectif',
+    'Tertiaire / Bureaux': 'tertiaire',
+    'Infrastructure Publique': 'infrastructure_publique',
+  };
+  const priorityMap: Record<string, ProjectPriority> = {
+    Haute: 'haute',
+    Moyenne: 'moyenne',
+    Basse: 'basse',
+  };
+  const criticalityMap: Record<string, ProjectCriticality> = {
+    Standard: 'standard',
+    Sensible: 'sensible',
+    Critique: 'critique',
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Saving new project:', formData);
+    setIsSubmitting(true);
+    setSubmitError(null);
+    const payload: CreateInput<Project> = {
+      name: formData.name,
+      reference: formData.reference,
+      project_type: projectTypeMap[formData.type] ?? 'residentiel_collectif',
+      client_name: formData.client,
+      status: formData.status,
+      priority: priorityMap[formData.priority] ?? 'haute',
+      description: formData.description,
+      address: formData.address,
+      city: formData.city,
+      start_date: formData.startDate || null,
+      end_date: formData.endDate || null,
+      agency: agencyByName.get(formData.center) ?? null,
+      manager: null,
+      works_supervisor: null,
+      budget_amount: formData.budget || null,
+      max_staff: formData.maxStaff ? Number(formData.maxStaff) : null,
+      criticality: criticalityMap[formData.criticality] ?? 'standard',
+      tracking_mode: (formData.trackingMode as ProjectTrackingMode) ?? 'progress',
+      auto_alerts_enabled: true,
+      movement_slips_enabled: true,
+      rfid_sync_enabled: false,
+      ai_assistance_enabled: true,
+      is_draft: false,
+    };
+    try {
+      await apiServices.projects.create(payload);
+    } catch (error) {
+      console.error('Failed to save project:', error);
+      setSubmitError('Impossible de créer le projet pour le moment.');
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
     navigate('/projects');
   };
 
@@ -81,6 +168,11 @@ export default function NewProjectPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
         {/* Left: Form */}
         <div className="lg:col-span-9 space-y-10">
+          {submitError ? (
+            <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-3 text-sm text-error">
+              {submitError}
+            </div>
+          ) : null}
           {/* Section 1: General */}
           <section className="bg-white p-8 rounded-2xl shadow-[0_20px_40px_rgba(9,20,38,0.02)] border border-slate-100">
             <div className="flex items-center gap-3 mb-8">
@@ -235,9 +327,13 @@ export default function NewProjectPage() {
                     value={formData.center}
                     onChange={(e) => setFormData({...formData, center: e.target.value})}
                   >
-                    <option>Agence Littoral Nord</option>
-                    <option>Agence Atlantique Sud</option>
-                    <option>Agence Borgou</option>
+                    {agencies.length > 0 ? (
+                      agencies.map((agency) => (
+                        <option key={agency.id}>{agency.name}</option>
+                      ))
+                    ) : (
+                      <option>Agence Littoral Nord</option>
+                    )}
                   </select>
                   <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                 </div>
@@ -458,9 +554,10 @@ export default function NewProjectPage() {
             </button>
             <button 
               onClick={handleSubmit}
+              disabled={isSubmitting}
               className="px-12 py-3 rounded-xl bg-primary text-white font-black hover:bg-primary-container transition-all shadow-[0_10px_20px_rgba(9,20,38,0.2)] flex items-center gap-3"
             >
-              <span>CRÉER LE PROJET</span>
+              <span>{isSubmitting ? 'CRÉATION...' : 'CRÉER LE PROJET'}</span>
               <ArrowRight className="w-5 h-5" />
             </button>
           </div>

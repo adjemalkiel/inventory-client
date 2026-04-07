@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -12,9 +12,23 @@ import {
   BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiServices } from '@/lib/api';
+import type {
+  Category,
+  CreateInput,
+  Item,
+  StockBalance,
+  StorageLocation,
+  UnitOfMeasure,
+} from '@/types/api';
 
 export default function NewItemPage() {
   const navigate = useNavigate();
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
+  const [locations, setLocations] = useState<StorageLocation[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     ref: '',
@@ -26,10 +40,91 @@ export default function NewItemPage() {
     description: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([
+      apiServices.categories.list(),
+      apiServices.unitsOfMeasure.list(),
+      apiServices.storageLocations.list(),
+    ])
+      .then(([categoriesData, unitsData, locationsData]) => {
+        if (!isMounted) return;
+        setCategories(categoriesData);
+        setUnits(unitsData);
+        setLocations(locationsData);
+        if (categoriesData.length > 0) {
+          setFormData((prev) => ({ ...prev, category: categoriesData[0].name }));
+        }
+        if (unitsData.length > 0) {
+          setFormData((prev) => ({ ...prev, unit: unitsData[0].name }));
+        }
+        if (locationsData.length > 0) {
+          setFormData((prev) => ({ ...prev, location: locationsData[0].name }));
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load item form dependencies:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const categoryByName = useMemo(() => {
+    return new Map(categories.map((category) => [category.name, category.id]));
+  }, [categories]);
+  const unitByName = useMemo(() => {
+    return new Map(units.map((unit) => [unit.name, unit.id]));
+  }, [units]);
+  const locationByName = useMemo(() => {
+    return new Map(locations.map((location) => [location.name, location.id]));
+  }, [locations]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, we would save the data here
-    console.log('Saving new item:', formData);
+    const categoryId = categoryByName.get(formData.category);
+    const unitId = unitByName.get(formData.unit);
+    const locationId = locationByName.get(formData.location);
+    if (!categoryId || !unitId || !locationId) {
+      setSubmitError(
+        'Catégorie, unité et lieu doivent être sélectionnés depuis les données API.',
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    const itemPayload: CreateInput<Item> = {
+      name: formData.name,
+      sku: formData.ref,
+      category: categoryId,
+      description: formData.description,
+      subcategory_label: '',
+      brand: '',
+      image_url: '',
+      purchase_date: null,
+      warranty_label: '',
+      supplier_name: '',
+      unit: unitId,
+      min_stock: formData.minStock || '0',
+      is_active: true,
+    };
+    try {
+      const item = await apiServices.items.create(itemPayload);
+      const stockPayload: CreateInput<StockBalance> = {
+        item: item.id,
+        storage_location: locationId,
+        zone_label: '',
+        quantity: formData.currentStock || '0',
+      };
+      await apiServices.stockBalances.create(stockPayload);
+    } catch (error) {
+      console.error('Failed to save item:', error);
+      setSubmitError("Impossible d'enregistrer cet article pour le moment.");
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
     navigate('/inventory');
   };
 
@@ -52,6 +147,11 @@ export default function NewItemPage() {
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-6">
+          {submitError ? (
+            <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-3 text-sm text-error">
+              {submitError}
+            </div>
+          ) : null}
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-surface-container-high space-y-6">
             <div className="flex items-center gap-3 pb-4 border-b border-surface-dim/10">
               <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
@@ -101,10 +201,13 @@ export default function NewItemPage() {
                       value={formData.category}
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
                     >
-                      <option>Outillage</option>
-                      <option>Matériel</option>
-                      <option>Consommables</option>
-                      <option>Équipements</option>
+                      {categories.length > 0 ? (
+                        categories.map((category) => (
+                          <option key={category.id}>{category.name}</option>
+                        ))
+                      ) : (
+                        <option>Outillage</option>
+                      )}
                     </select>
                   </div>
                 </div>
@@ -166,11 +269,13 @@ export default function NewItemPage() {
                   value={formData.unit}
                   onChange={(e) => setFormData({...formData, unit: e.target.value})}
                 >
-                  <option>Unités</option>
-                  <option>Sacs</option>
-                  <option>Litres</option>
-                  <option>Mètres</option>
-                  <option>Kg</option>
+                  {units.length > 0 ? (
+                    units.map((unit) => (
+                      <option key={unit.id}>{unit.name}</option>
+                    ))
+                  ) : (
+                    <option>Unités</option>
+                  )}
                 </select>
               </div>
 
@@ -183,9 +288,13 @@ export default function NewItemPage() {
                     value={formData.location}
                     onChange={(e) => setFormData({...formData, location: e.target.value})}
                   >
-                    <option>Dépôt Cotonou</option>
-                    <option>Dépôt Parakou</option>
-                    <option>Chantier Porto-Novo</option>
+                    {locations.length > 0 ? (
+                      locations.map((location) => (
+                        <option key={location.id}>{location.name}</option>
+                      ))
+                    ) : (
+                      <option>Dépôt Cotonou</option>
+                    )}
                   </select>
                 </div>
               </div>
@@ -201,10 +310,11 @@ export default function NewItemPage() {
             </p>
             <button 
               type="submit"
+              disabled={isSubmitting}
               className="w-full py-4 bg-white text-primary font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-slate-100 transition-all active:scale-95 shadow-lg"
             >
               <Save className="w-5 h-5" />
-              <span>Enregistrer l'article</span>
+              <span>{isSubmitting ? 'Enregistrement...' : "Enregistrer l'article"}</span>
             </button>
           </div>
 

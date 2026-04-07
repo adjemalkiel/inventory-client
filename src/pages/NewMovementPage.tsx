@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   X, 
@@ -17,9 +17,104 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { apiServices } from '@/lib/api';
+import type {
+  CreateInput,
+  Item,
+  Project,
+  StockMovement,
+  StockMovementType,
+  StorageLocation,
+} from '@/types/api';
 
 export default function NewMovementPage() {
   const navigate = useNavigate();
+  const [items, setItems] = useState<Item[]>([]);
+  const [locations, setLocations] = useState<StorageLocation[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    movementType: 'transfert' as StockMovementType,
+    quantity: '',
+    itemId: '',
+    sourceLocationId: '',
+    destinationLocationId: '',
+    projectId: '',
+    comment: '',
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([
+      apiServices.items.list(),
+      apiServices.storageLocations.list(),
+      apiServices.projects.list(),
+    ])
+      .then(([itemsData, locationsData, projectsData]) => {
+        if (!isMounted) return;
+        setItems(itemsData);
+        setLocations(locationsData);
+        setProjects(projectsData);
+        setFormData((prev) => ({
+          ...prev,
+          itemId: itemsData[0]?.id ?? '',
+          sourceLocationId: locationsData[0]?.id ?? '',
+          destinationLocationId: locationsData[1]?.id ?? locationsData[0]?.id ?? '',
+          projectId: projectsData[0]?.id ?? '',
+        }));
+      })
+      .catch((error) => {
+        console.error('Failed to load movement dependencies:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const movementRequiresSource = useMemo(
+    () => formData.movementType !== 'entree',
+    [formData.movementType],
+  );
+  const movementRequiresDestination = useMemo(
+    () => formData.movementType !== 'sortie',
+    [formData.movementType],
+  );
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!formData.itemId || !formData.quantity) {
+      setSubmitError("Article et quantité sont requis.");
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmitError(null);
+    const payload: CreateInput<StockMovement> = {
+      movement_type: formData.movementType,
+      item: formData.itemId,
+      quantity: formData.quantity,
+      source_storage_location:
+        movementRequiresSource && formData.sourceLocationId
+          ? formData.sourceLocationId
+          : null,
+      destination_storage_location:
+        movementRequiresDestination && formData.destinationLocationId
+          ? formData.destinationLocationId
+          : null,
+      project: formData.projectId ? formData.projectId : null,
+      comment: formData.comment,
+    };
+    try {
+      await apiServices.stockMovements.create(payload);
+    } catch (error) {
+      console.error('Failed to save movement:', error);
+      setSubmitError("Impossible d'enregistrer ce mouvement.");
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
+    navigate('/inventory');
+  };
 
   return (
     <div className="min-h-screen bg-surface font-body text-on-surface">
@@ -72,13 +167,27 @@ export default function NewMovementPage() {
               <p className="text-slate-500 text-lg">Veuillez renseigner les détails du transfert de stock ou de matériel.</p>
             </div>
 
-            <form className="space-y-10">
+            <form className="space-y-10" onSubmit={handleSubmit}>
+              {submitError ? (
+                <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-3 text-sm text-error">
+                  {submitError}
+                </div>
+              ) : null}
               {/* Section 1: Type & Quantity */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-3">
                   <label className="block font-label text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">Type de mouvement</label>
                   <div className="relative group">
-                    <select defaultValue="transfert" className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200">
+                    <select
+                      value={formData.movementType}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          movementType: e.target.value as StockMovementType,
+                        }))
+                      }
+                      className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200"
+                    >
                       <option value="entree">Entrée (Stockage)</option>
                       <option value="sortie">Sortie (Usage Chantier)</option>
                       <option value="transfert">Transfert Inter-Sites</option>
@@ -93,6 +202,11 @@ export default function NewMovementPage() {
                     className="w-full h-16 px-6 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all shadow-sm hover:border-slate-200" 
                     placeholder="0.00" 
                     type="number"
+                    min="0"
+                    value={formData.quantity}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, quantity: e.target.value }))
+                    }
                   />
                 </div>
               </div>
@@ -102,11 +216,19 @@ export default function NewMovementPage() {
                 <label className="block font-label text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">Article / Matériel</label>
                 <div className="relative group">
                   <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-hover:text-primary transition-colors" />
-                  <input 
-                    className="w-full h-16 pl-14 pr-24 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all shadow-sm hover:border-slate-200" 
-                    placeholder="Rechercher par nom, référence ou SKU..." 
-                    type="text"
-                  />
+                  <select
+                    className="w-full h-16 pl-14 pr-24 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all shadow-sm hover:border-slate-200 appearance-none"
+                    value={formData.itemId}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, itemId: e.target.value }))
+                    }
+                  >
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} ({item.sku})
+                      </option>
+                    ))}
+                  </select>
                   <div className="absolute right-6 top-1/2 -translate-y-1/2 text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-400 uppercase tracking-tighter">CMD + K</div>
                 </div>
               </div>
@@ -116,10 +238,22 @@ export default function NewMovementPage() {
                 <div className="space-y-3">
                   <label className="block font-label text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">Lieu Source</label>
                   <div className="relative group">
-                    <select className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200">
-                      <option>Entrepôt Central A</option>
-                      <option>Dépôt Nord</option>
-                      <option>Zone d'Achat Direct</option>
+                    <select
+                      className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200"
+                      value={formData.sourceLocationId}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          sourceLocationId: e.target.value,
+                        }))
+                      }
+                      disabled={!movementRequiresSource}
+                    >
+                      {locations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                        </option>
+                      ))}
                     </select>
                     <Warehouse className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 w-5 h-5" />
                   </div>
@@ -127,10 +261,22 @@ export default function NewMovementPage() {
                 <div className="space-y-3">
                   <label className="block font-label text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">Lieu Destination</label>
                   <div className="relative group">
-                    <select className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200">
-                      <option>Chantier Horizon</option>
-                      <option>Résidence Belle Vue</option>
-                      <option>Entrepôt Central B</option>
+                    <select
+                      className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200"
+                      value={formData.destinationLocationId}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          destinationLocationId: e.target.value,
+                        }))
+                      }
+                      disabled={!movementRequiresDestination}
+                    >
+                      {locations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                        </option>
+                      ))}
                     </select>
                     <MapPin className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 w-5 h-5" />
                   </div>
@@ -141,10 +287,19 @@ export default function NewMovementPage() {
               <div className="space-y-3">
                 <label className="block font-label text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">Chantier Associé</label>
                 <div className="relative group">
-                  <select className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200">
-                    <option>Horizon - Lot 4 (Rénovation)</option>
-                    <option>Tour Altair - Fondations</option>
-                    <option>Non assigné</option>
+                  <select
+                    className="w-full h-16 pl-6 pr-12 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary appearance-none transition-all shadow-sm group-hover:border-slate-200"
+                    value={formData.projectId}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, projectId: e.target.value }))
+                    }
+                  >
+                    <option value="">Non assigné</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
                   </select>
                   <Construction className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 w-5 h-5" />
                 </div>
@@ -157,6 +312,10 @@ export default function NewMovementPage() {
                   className="w-full p-6 bg-white border border-slate-100 rounded-2xl text-primary font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all shadow-sm hover:border-slate-200 resize-none" 
                   placeholder="Précisez la raison du mouvement ou des instructions spécifiques..." 
                   rows={4}
+                  value={formData.comment}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, comment: e.target.value }))
+                  }
                 />
               </div>
 
@@ -176,12 +335,12 @@ export default function NewMovementPage() {
                   Enregistrer et créer un autre
                 </button>
                 <button 
-                  onClick={(e) => { e.preventDefault(); navigate('/inventory'); }}
+                  disabled={isSubmitting}
                   className="w-full sm:w-auto px-12 py-4 font-bold text-white bg-primary shadow-xl shadow-primary/20 hover:bg-primary-container hover:scale-[1.02] active:scale-[0.98] transition-all rounded-2xl flex items-center justify-center gap-3" 
                   type="submit"
                 >
                   <Save className="w-5 h-5" />
-                  Enregistrer
+                  {isSubmitting ? 'Enregistrement...' : 'Enregistrer'}
                 </button>
               </div>
             </form>
