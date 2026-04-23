@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Search, Bell, Menu, CheckCircle2, AlertTriangle, Info, Clock, X, User, Settings as SettingsIcon, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
+import { useCurrentUser } from '@/context/CurrentUserContext';
+import { userDisplayName, userInitials } from '@/lib/userDisplay';
 import { cn } from '@/lib/utils';
 
 interface TopNavProps {
@@ -42,11 +44,21 @@ const notifications = [
 ];
 
 export function TopNav({ onMenuClick }: TopNavProps) {
+  const { me, status, logout: logoutUser } = useCurrentUser();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const nameLine = me ? userDisplayName(me.user) : null;
+  const subtitle = me
+    ? me.profile.job_title || me.profile.role_label || '—'
+    : status === 'loading' || status === 'idle'
+      ? 'Chargement…'
+      : '—';
+  const emailLine = me?.user.email ?? '';
+  const avatarLetters = me ? userInitials(me.user) : '—';
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -157,12 +169,19 @@ export function TopNav({ onMenuClick }: TopNavProps) {
             }}
             className="flex items-center space-x-2 md:space-x-4 cursor-pointer hover:opacity-80 transition-opacity p-1 rounded-xl hover:bg-surface-container-low"
           >
-            <div className="text-right hidden sm:block">
-              <p className="text-sm font-semibold text-primary">Jean Dossou</p>
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Directeur Travaux</p>
+            <div className="text-right hidden sm:block min-w-0 max-w-[200px]">
+              <p className="text-sm font-semibold text-primary truncate" title={nameLine ?? undefined}>
+                {nameLine ?? (status === 'loading' ? '…' : 'Utilisateur')}
+              </p>
+              <p
+                className="text-[10px] text-on-surface-variant uppercase tracking-wider truncate"
+                title={subtitle}
+              >
+                {subtitle}
+              </p>
             </div>
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold text-sm md:text-base border-2 border-transparent group-hover:border-primary/20 transition-all">
-              JD
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold text-xs md:text-sm border-2 border-transparent group-hover:border-primary/20 transition-all shrink-0">
+              {avatarLetters}
             </div>
           </div>
 
@@ -176,12 +195,14 @@ export function TopNav({ onMenuClick }: TopNavProps) {
               >
                 <div className="px-4 py-3 border-b border-slate-50 mb-1">
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Compte</p>
-                  <p className="text-sm font-bold text-primary truncate">jean.dossou@batirpro.bj</p>
+                  <p className="text-sm font-bold text-primary truncate" title={emailLine}>
+                    {emailLine || '—'}
+                  </p>
                 </div>
 
                 <button 
                   onClick={() => {
-                    navigate('/users');
+                    navigate('/profile');
                     setIsProfileOpen(false);
                   }}
                   className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm font-medium text-on-surface hover:bg-primary/5 rounded-xl transition-colors group"
@@ -204,7 +225,14 @@ export function TopNav({ onMenuClick }: TopNavProps) {
                 <div className="h-[1px] bg-slate-50 my-1"></div>
 
                 <button 
-                  onClick={() => navigate('/login')}
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      await logoutUser();
+                      navigate('/login', { replace: true });
+                    })();
+                    setIsProfileOpen(false);
+                  }}
                   className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm font-medium text-error hover:bg-error/5 rounded-xl transition-colors group"
                 >
                   <LogOut className="w-4 h-4 text-error/60 group-hover:text-error transition-colors" />

@@ -59,15 +59,86 @@ export interface UserSummary {
   last_name: string;
 }
 
+/** Django `auth_user` (API: `/api/users/`) for admin Gestion des utilisateurs. */
+export interface DjangoUser {
+  id: UserId;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_active: boolean;
+  is_staff: boolean;
+  is_superuser: boolean;
+  date_joined: ISODateTime;
+  last_login: ISODateTime | null;
+}
+
 export interface UserProfile extends ApiAudit {
   user: UserId;
   role: UserProfileRole;
   site: UUID | null;
   job_title: string;
+  phone?: string;
   invited_at: ISODateTime | null;
   activated_at: ISODateTime | null;
   user_detail?: UserSummary;
+  /** Présent sur la réponse d’un POST/PATCH si `notify_user: true` a été demandé. */
+  notify_email_sent?: boolean;
 }
+
+/** GET/PATCH /api/me/ — no audit fields, profile slice is a subset. */
+export interface MeUser {
+  id: UserId;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  date_joined: ISODateTime;
+  last_login: ISODateTime | null;
+}
+
+export type MePrefLanguage = 'fr-FR' | 'en-US';
+export type MePrefTimezone =
+  | 'Europe/Paris'
+  | 'Africa/Porto-Novo'
+  | 'UTC';
+export type MePrefDateFormat = 'dmy' | 'mdy' | 'ymd';
+export type MePrefDisplayDensity = 'standard' | 'compact' | 'comfortable';
+export type MePrefCurrency = 'EUR' | 'XOF' | 'USD' | 'CNY';
+
+export interface MeProfile {
+  id: UUID;
+  role: UserProfileRole;
+  role_label: string;
+  job_title: string;
+  phone: string;
+  site: UUID | null;
+  site_name: string | null;
+  pref_language: MePrefLanguage;
+  pref_timezone: MePrefTimezone;
+  pref_date_format: MePrefDateFormat;
+  pref_display_density: MePrefDisplayDensity;
+  pref_currency: MePrefCurrency;
+}
+
+export interface MeResponse {
+  user: MeUser;
+  profile: MeProfile;
+}
+
+export type MeUpdatePayload = {
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  job_title?: string;
+  phone?: string;
+  site?: UUID | null;
+  pref_language?: MePrefLanguage;
+  pref_timezone?: MePrefTimezone;
+  pref_date_format?: MePrefDateFormat;
+  pref_display_density?: MePrefDisplayDensity;
+  pref_currency?: MePrefCurrency;
+};
 
 export interface CreateUserProfileInput {
   user: UserId;
@@ -75,7 +146,25 @@ export interface CreateUserProfileInput {
   site: UUID | null;
   job_title: string;
   invite_token?: string;
+  /** When true, backend sends an HTML e-mail to the user (SMTP / org settings). */
+  notify_user?: boolean;
 }
+
+/** `POST /users/invite/` — création compte + profil + e-mail d’invitation. */
+export type InviteUserPayload = {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  role: UserProfileRole;
+  site: UUID | null;
+  job_title?: string;
+};
+
+export type InviteUserResponse = {
+  user: DjangoUser;
+  profile: UserProfile;
+  invitation_email_sent: boolean;
+};
 
 export interface Item extends ApiAudit {
   name: string;
@@ -158,6 +247,17 @@ export interface OrganizationSettings extends ApiAudit {
   expiry_alerts_enabled: boolean;
   predictive_analysis_enabled: boolean;
   auto_reports_enabled: boolean;
+  smtp_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_use_tls: boolean;
+  smtp_use_ssl: boolean;
+  smtp_user: string;
+  smtp_from_email: string;
+  /** Present in API responses; password is never returned. */
+  smtp_has_password: boolean;
+  /** Set only in PATCH/PUT; never read from the API. */
+  smtp_password?: string;
 }
 
 export interface Integration extends ApiAudit {

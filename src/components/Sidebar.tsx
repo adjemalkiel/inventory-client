@@ -14,6 +14,8 @@ import {
   HardHat,
   X
 } from 'lucide-react';
+import { useCurrentUser } from '@/context/CurrentUserContext';
+import { userDisplayName, userInitials } from '@/lib/userDisplay';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -38,6 +40,15 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
+  const { me, status } = useCurrentUser();
+  const sideName = me ? userDisplayName(me.user) : null;
+  const sideLine2 = me
+    ? me.profile.job_title || me.profile.role_label || '—'
+    : status === 'loading' || status === 'idle'
+      ? 'Chargement…'
+      : '—';
+  const sideInitials = me ? userInitials(me.user) : '—';
+
   return (
     <>
       {/* Overlay for mobile */}
@@ -115,11 +126,17 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </nav>
 
         <div className="px-4 mt-auto pt-8 border-t border-white/5">
-          <div className="p-4 bg-white/5 rounded-xl flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold text-xs">JD</div>
-            <div className="overflow-hidden">
-              <p className="text-xs font-semibold text-white truncate">Jean Dupont</p>
-              <p className="text-[10px] text-slate-500 truncate">Chef de Chantier</p>
+          <div className="p-4 bg-white/5 rounded-xl flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-bold text-xs shrink-0">
+              {sideInitials}
+            </div>
+            <div className="overflow-hidden min-w-0">
+              <p className="text-xs font-semibold text-white truncate" title={sideName ?? undefined}>
+                {sideName ?? (status === 'loading' ? '…' : 'Utilisateur')}
+              </p>
+              <p className="text-[10px] text-slate-500 truncate" title={sideLine2}>
+                {sideLine2}
+              </p>
             </div>
           </div>
         </div>

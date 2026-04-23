@@ -1,2 +1,3 @@
 export { default as http } from './http';
-export { apiServices } from './services';
+export { apiServices, authApi, meApi, organizationSettingsApi } from './services';
+export type { LoginResponse, SmtpTestPayload } from './services';

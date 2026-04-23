@@ -1,14 +1,49 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { HardHat, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
 
+import { setStoredToken } from '@/lib/auth';
+import { authApi } from '@/lib/api';
+import { useCurrentUser } from '@/context/CurrentUserContext';
+
+function parseAuthErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err) && err.response?.data) {
+    const d = err.response.data as { detail?: string | string[] };
+    if (typeof d.detail === 'string') {
+      return d.detail;
+    }
+    if (Array.isArray(d.detail) && d.detail.length > 0) {
+      return d.detail.join(' ');
+    }
+  }
+  return "Impossible de se connecter. Vérifiez que l'API est accessible.";
+}
+
 export default function LoginPage() {
+  const { refresh: refreshCurrentUser } = useCurrentUser();
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate('/dashboard');
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const res = await authApi.login({ email: email.trim(), password });
+      setStoredToken(res.token, remember);
+      await refreshCurrentUser();
+      navigate('/dashboard');
+    } catch (err) {
+      setError(parseAuthErrorMessage(err));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -64,7 +99,16 @@ export default function LoginPage() {
             <p className="text-on-surface-variant text-sm md:text-base">Accédez à votre espace de gestion d'inventaire</p>
           </div>
 
-          <form className="space-y-6 md:space-y-8" onSubmit={handleLogin}>
+          <form className="space-y-6 md:space-y-8" onSubmit={handleLogin} noValidate>
+            {error && (
+              <p
+                className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3"
+                role="alert"
+              >
+                {error}
+              </p>
+            )}
+
             <div className="relative group">
               <label className="font-sans text-[10px] font-bold text-outline tracking-wider uppercase mb-2 block transition-colors group-focus-within:text-primary" htmlFor="email">
                 E-mail professionnel
@@ -73,9 +117,15 @@ export default function LoginPage() {
                 <input 
                   className="w-full bg-surface-container-highest border-none rounded-lg py-3 md:py-4 px-10 md:px-12 text-on-surface placeholder:text-outline-variant focus:bg-white focus:ring-2 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm md:text-base"
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="nom@entreprise.bj"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
+                  disabled={isSubmitting}
+                  aria-invalid={error ? 'true' : 'false'}
                 />
                 <Mail className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-outline group-focus-within:text-primary transition-colors w-4 h-4 md:w-5 md:h-5" />
               </div>
@@ -86,17 +136,26 @@ export default function LoginPage() {
                 <label className="font-sans text-[10px] font-bold text-outline tracking-wider uppercase transition-colors group-focus-within:text-primary" htmlFor="password">
                   Mot de passe
                 </label>
-                <a className="text-xs md:text-sm font-medium text-primary hover:underline underline-offset-4 transition-all" href="#">
+                <Link
+                  to="/forgot-password"
+                  className="text-xs md:text-sm font-medium text-primary hover:underline underline-offset-4 transition-all"
+                >
                   Oublié ?
-                </a>
+                </Link>
               </div>
               <div className="relative">
                 <input 
                   className="w-full bg-surface-container-highest border-none rounded-lg py-3 md:py-4 px-10 md:px-12 text-on-surface placeholder:text-outline-variant focus:bg-white focus:ring-2 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm md:text-base"
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
+                  disabled={isSubmitting}
+                  aria-invalid={error ? 'true' : 'false'}
                 />
                 <Lock className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-outline group-focus-within:text-primary transition-colors w-4 h-4 md:w-5 md:h-5" />
                 <button 
@@ -111,16 +170,23 @@ export default function LoginPage() {
 
             <div className="flex items-center">
               <label className="flex items-center cursor-pointer group">
-                <input type="checkbox" className="w-4 h-4 md:w-5 md:h-5 rounded-md border-outline-variant bg-surface-container-highest text-primary focus:ring-primary/20 transition-all" />
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 md:w-5 md:h-5 rounded-md border-outline-variant bg-surface-container-highest text-primary focus:ring-primary/20 transition-all"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.targetChecked)}
+                  disabled={isSubmitting}
+                />
                 <span className="ml-3 text-xs md:text-sm text-on-surface-variant group-hover:text-on-surface transition-colors">Rester connecté</span>
               </label>
             </div>
 
             <button 
               type="submit"
-              className="w-full architectural-gradient text-white font-semibold py-3 md:py-4 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-400 flex items-center justify-center gap-2"
+              disabled={isSubmitting}
+              className="w-full architectural-gradient text-white font-semibold py-3 md:py-4 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-400 flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
             >
-              <span>Se connecter</span>
+              <span>{isSubmitting ? 'Connexion…' : 'Se connecter'}</span>
               <ArrowRight className="w-5 h-5" />
             </button>
           </form>
