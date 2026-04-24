@@ -21,7 +21,6 @@ import AlertsPage from './pages/AlertsPage';
 import AuditsPage from './pages/AuditsPage';
 import AIAssistantPage from './pages/AIAssistantPage';
 import UsersPage from './pages/UsersPage';
-import NewUserPage from './pages/NewUserPage';
 import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import NewMovementPage from './pages/NewMovementPage';
@@ -54,7 +53,6 @@ export default function App() {
           <Route path="/audits" element={<AuditsPage />} />
           <Route path="/ai-assistant" element={<AIAssistantPage />} />
           <Route path="/users" element={<UsersPage />} />
-          <Route path="/users/new" element={<NewUserPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

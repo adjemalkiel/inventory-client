@@ -158,12 +158,39 @@ export type InviteUserPayload = {
   role: UserProfileRole;
   site: UUID | null;
   job_title?: string;
+  phone?: string;
 };
+
+/**
+ * Identifiant du backend e-mail ayant effectivement livré le message.
+ *
+ * - `"org-smtp"` : SMTP de l’organisation (Paramètres → Intégrations → SMTP).
+ * - `"console"` : le backend `console.EmailBackend` de Django a imprimé le
+ *   contenu dans stdout du serveur — **pas une vraie livraison** (courant en
+ *   dev sans `EMAIL_HOST` configuré).
+ * - `"django-smtp"` : SMTP déclaré dans les variables d’environnement Django
+ *   (`EMAIL_HOST`/`EMAIL_HOST_USER`/…), hors réglages applicatifs.
+ * - `"locmem"` / `"filebased"` / `"dummy"` : backends alternatifs (tests).
+ * - `"no-recipient"` : le compte cible n’a pas d’adresse e-mail.
+ * - `"error"` : une exception a été levée pendant l’envoi.
+ * - `"other"` : backend custom non reconnu.
+ */
+export type EmailDeliveryKind =
+  | 'org-smtp'
+  | 'console'
+  | 'django-smtp'
+  | 'locmem'
+  | 'filebased'
+  | 'dummy'
+  | 'no-recipient'
+  | 'error'
+  | 'other';
 
 export type InviteUserResponse = {
   user: DjangoUser;
   profile: UserProfile;
   invitation_email_sent: boolean;
+  email_delivery?: EmailDeliveryKind;
 };
 
 export interface Item extends ApiAudit {

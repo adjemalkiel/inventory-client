@@ -17,9 +17,11 @@ import {
   Package,
   PauseCircle,
   ScanLine,
+  Send,
   Shield,
   ShieldCheck,
   Sparkles,
+  Trash2,
   User,
   UserCheck,
   UserCog,
@@ -28,10 +30,10 @@ import {
   Warehouse,
   X,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
-
+import InviteUserDialog from '@/components/InviteUserDialog';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import { apiServices } from '@/lib/api';
+import { describeEmailDelivery } from '@/lib/email-delivery';
 import { cn } from '@/lib/utils';
 import type { DjangoUser, Site, UserProfile, UserProfileRole } from '@/types/api';
 import type { UUID } from '@/types/common';
@@ -332,6 +334,8 @@ export default function UsersPage() {
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [rowBusy, setRowBusy] = useState<number | null>(null);
+  /** Ouverture du dialogue d’invitation (remplace l’ancienne route `/users/new`). */
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const [editPerimeterMode, setEditPerimeterMode] = useState<PerimeterMode>('all');
   const [operationalRights, setOperationalRights] = useState<OperationalRights>(() =>
@@ -535,6 +539,113 @@ export default function UsersPage() {
     }
   };
 
+  /**
+   * Admin-triggered password reset: server generates a reset link and e-mails it
+   * to the user (same link/template as « mot de passe oublié »). Useful when a
+   * colleague has lost access or when IT receives a request by phone.
+   */
+  const sendPasswordReset = async (row: Row) => {
+    if (row.user.id === selfId) {
+      window.alert(
+        "Utilisez la page « Mon profil » pour changer votre propre mot de passe.",
+      );
+      return;
+    }
+    if (!row.user.is_active) {
+      window.alert(
+        "Ce compte est désactivé : réactivez-le avant d’envoyer un lien de réinitialisation.",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Envoyer à ${row.user.email} un e-mail contenant un lien de réinitialisation de mot de passe ?`,
+      )
+    ) {
+      return;
+    }
+    closeUserMenu();
+    setPreview(null);
+    setRowBusy(row.user.id);
+    try {
+      const res = await apiServices.users.sendPasswordReset(row.user.id);
+      const delivery = describeEmailDelivery(res.email_delivery);
+      if (res.password_reset_email_sent === false) {
+        window.alert(
+          "La demande a été enregistrée, mais l’e-mail n’a pas pu être envoyé.\n\n" +
+            (delivery.label ||
+              "Vérifiez la configuration SMTP (Paramètres → Intégrations → SMTP)."),
+        );
+      } else if (!delivery.ok) {
+        window.alert(delivery.label);
+      } else {
+        window.alert(
+          `Lien de réinitialisation envoyé à ${row.user.email}.` +
+            (delivery.label ? `\n\n${delivery.label}` : ""),
+        );
+      }
+    } catch (e) {
+      let msg = "Impossible d’envoyer le lien de réinitialisation.";
+      if (axios.isAxiosError(e) && e.response?.data) {
+        const d = e.response.data;
+        if (typeof d === "object" && d !== null && "detail" in d) {
+          msg = String((d as { detail: unknown }).detail);
+        }
+      }
+      window.alert(msg);
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
+  const resendInvitation = async (row: Row) => {
+    if (!row.profile) {
+      closeUserMenu();
+      setPreview(null);
+      window.alert(
+        "Ce compte n’a pas encore de profil (rôle, site). " +
+          "Ouvrez « Modifier les accès » pour l’enregistrer, puis renvoyez l’invitation.",
+      );
+      return;
+    }
+    closeUserMenu();
+    setPreview(null);
+    setRowBusy(row.user.id);
+    try {
+      const res = await apiServices.users.resendInvitation(row.user.id);
+      const delivery = describeEmailDelivery(res.email_delivery);
+      if (res.invitation_email_sent === false) {
+        window.alert(
+          "L’enregistrement a été pris en compte, mais l’e-mail d’invitation n’a pas pu être envoyé.\n\n" +
+            (delivery.label ||
+              "Vérifiez la configuration SMTP (Paramètres → Intégrations → SMTP)."),
+        );
+      } else if (!delivery.ok) {
+        // Backend a répondu "envoyé" mais a utilisé le backend console / dummy :
+        // en pratique rien n'est parti. Le dire explicitement, sinon l'admin
+        // pense que la personne a reçu le lien.
+        window.alert(delivery.label);
+      } else {
+        window.alert(
+          `E-mail d’invitation renvoyé à ${row.user.email}.` +
+            (delivery.label ? `\n\n${delivery.label}` : ""),
+        );
+      }
+      await load();
+    } catch (e) {
+      let msg = "Impossible de renvoyer l’invitation.";
+      if (axios.isAxiosError(e) && e.response?.data) {
+        const d = e.response.data;
+        if (typeof d === "object" && d !== null && "detail" in d) {
+          msg = String((d as { detail: unknown }).detail);
+        }
+      }
+      window.alert(msg);
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
   const confirmSuspend = (row: Row) => {
     if (
       !window.confirm(
@@ -557,6 +668,54 @@ export default function UsersPage() {
     void setActive(row, false);
   };
 
+  /**
+   * Suppression définitive d’un compte jamais connecté.
+   *
+   * Pensé pour annuler proprement une invitation mal envoyée : le profil n’a
+   * aucun historique métier (mouvements, audits…), donc un DELETE HTTP est sûr
+   * — contrairement aux comptes déjà actifs qui doivent être désactivés pour
+   *   préserver l’intégrité des logs.
+   */
+  const deleteAccount = async (row: Row) => {
+    if (row.user.id === selfId) {
+      window.alert("Vous ne pouvez pas supprimer votre propre compte.");
+      return;
+    }
+    if (row.user.last_login) {
+      window.alert(
+        "Ce compte s’est déjà connecté : préférez la désactivation pour préserver l’historique.",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Supprimer définitivement le compte ${row.user.email} ?\n\n` +
+          "Cette action est irréversible. Comme l’utilisateur ne s’est jamais " +
+          "connecté, aucune donnée métier ne sera perdue.",
+      )
+    ) {
+      return;
+    }
+    closeUserMenu();
+    setPreview(null);
+    setRowBusy(row.user.id);
+    try {
+      await apiServices.users.remove(row.user.id);
+      await load();
+    } catch (e) {
+      let msg = "Suppression impossible.";
+      if (axios.isAxiosError(e) && e.response?.data) {
+        const d = e.response.data;
+        if (typeof d === "object" && d !== null && "detail" in d) {
+          msg = String((d as { detail: unknown }).detail);
+        }
+      }
+      window.alert(msg);
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
   const [siteOptions, setSiteOptions] = useState<Site[]>([]);
   useEffect(() => {
     void apiServices.sites
@@ -566,7 +725,7 @@ export default function UsersPage() {
   }, []);
 
   const menuRow = menuUserId != null ? rows.find((r) => r.user.id === menuUserId) : null;
-  const userActionsMenuW = 192;
+  const userActionsMenuW = 240;
   const userActionsMenuGap = 4;
 
   return (
@@ -582,13 +741,14 @@ export default function UsersPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-4">
-          <Link
-            to="/users/new"
+          <button
+            type="button"
+            onClick={() => setInviteOpen(true)}
             className="flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-white font-bold text-sm shadow-lg hover:bg-primary-container transition-all active:scale-95"
           >
             <UserPlus className="w-5 h-5" />
             Inviter un utilisateur
-          </Link>
+          </button>
         </div>
       </div>
 
@@ -757,7 +917,7 @@ export default function UsersPage() {
         createPortal(
           <div
             data-user-actions-root
-            className="fixed z-[2000] w-48 rounded-xl border border-slate-200/80 bg-white py-2 text-left shadow-xl"
+            className="fixed z-[2000] w-60 rounded-xl border border-slate-200/80 bg-white py-2 text-left shadow-xl"
             style={{ top: menuPosition.top, left: menuPosition.left }}
             role="menu"
           >
@@ -782,9 +942,37 @@ export default function UsersPage() {
               <UserCog className="h-[18px] w-[18px] shrink-0 text-slate-500" />
               Modifier les accès
             </button>
+            {!menuRow.user.last_login && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                role="menuitem"
+                onClick={() => {
+                  if (menuRow.user.id === selfId) {
+                    window.alert("Utilisez les flux habituels pour votre propre compte.");
+                    return;
+                  }
+                  void resendInvitation(menuRow);
+                }}
+              >
+                <Send className="h-[18px] w-[18px] shrink-0 text-slate-500" />
+                Renvoyer l’invitation
+              </button>
+            )}
             {menuRow.user.is_active ? (
               <>
                 <hr className="my-1 border-slate-200" />
+                {menuRow.user.id !== selfId && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-4 py-2 text-xs font-medium text-amber-600 hover:bg-amber-50 transition-colors"
+                    role="menuitem"
+                    onClick={() => void sendPasswordReset(menuRow)}
+                  >
+                    <KeyRound className="h-[18px] w-[18px] shrink-0" />
+                    Réinitialiser le mot de passe
+                  </button>
+                )}
                 <button
                   type="button"
                   className="flex w-full items-center gap-3 px-4 py-2 text-xs font-medium text-orange-600 hover:bg-orange-50 transition-colors"
@@ -801,22 +989,47 @@ export default function UsersPage() {
                   <PauseCircle className="h-[18px] w-[18px] shrink-0" />
                   Suspendre le compte
                 </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 px-4 py-2 text-xs font-medium text-error hover:bg-error/10 transition-colors"
-                  role="menuitem"
-                  onClick={() => {
-                    if (menuRow.user.id === selfId) {
-                      window.alert("Vous ne pouvez pas modifier l’accès de votre propre compte ici.");
-                      return;
-                    }
-                    closeUserMenu();
-                    confirmDeactivate(menuRow);
-                  }}
-                >
-                  <Ban className="h-[18px] w-[18px] shrink-0" />
-                  Désactiver
-                </button>
+                {menuRow.user.last_login ? (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-4 py-2 text-xs font-medium text-error hover:bg-error/10 transition-colors"
+                    role="menuitem"
+                    onClick={() => {
+                      if (menuRow.user.id === selfId) {
+                        window.alert("Vous ne pouvez pas modifier l’accès de votre propre compte ici.");
+                        return;
+                      }
+                      closeUserMenu();
+                      confirmDeactivate(menuRow);
+                    }}
+                  >
+                    <Ban className="h-[18px] w-[18px] shrink-0" />
+                    Désactiver
+                  </button>
+                ) : (
+                  /*
+                   * Compte jamais connecté : on propose la suppression définitive
+                   * plutôt que la désactivation. Cas typique : invitation envoyée
+                   * à la mauvaise personne ou faute de frappe sur l’adresse — on
+                   * veut pouvoir nettoyer proprement sans laisser un compte
+                   * inactif dans la liste.
+                   */
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-4 py-2 text-xs font-medium text-error hover:bg-error/10 transition-colors"
+                    role="menuitem"
+                    onClick={() => {
+                      if (menuRow.user.id === selfId) {
+                        window.alert("Vous ne pouvez pas supprimer votre propre compte.");
+                        return;
+                      }
+                      void deleteAccount(menuRow);
+                    }}
+                  >
+                    <Trash2 className="h-[18px] w-[18px] shrink-0" />
+                    Supprimer le compte
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -1713,6 +1926,15 @@ export default function UsersPage() {
           ))}
         </div>
       </div>
+
+      {inviteOpen && (
+        <InviteUserDialog
+          onClose={() => setInviteOpen(false)}
+          onInvited={() => {
+            void load();
+          }}
+        />
+      )}
     </div>
   );
 }

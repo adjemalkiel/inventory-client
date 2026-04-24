@@ -40,7 +40,11 @@
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px);
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+}
+
+.architectural-shadow {
+  box-shadow: 0 10px 40px -10px rgba(9, 20, 38, 0.15);
 }
 

@@ -8,6 +8,7 @@ import type {
   CreateInput,
   CreateUserProfileInput,
   DjangoUser,
+  EmailDeliveryKind,
   InviteUserPayload,
   InviteUserResponse,
   Integration,
@@ -46,13 +47,30 @@ export type SmtpTestPayload = {
   smtp_use_ssl?: boolean;
   smtp_user?: string;
   smtp_password?: string;
+  /** Expéditeur (aligné sur le formulaire Paramètres). */
+  smtp_from_email?: string;
+  /** Destinataire du message de test (sinon : e-mail du compte connecté côté API). */
+  to_email?: string;
+};
+
+/**
+ * Réponse JSON des endpoints `…/test-smtp/` et `…/send-test-smtp-email/`.
+ * `debug_log` contient la transcription smtplib (EHLO/STARTTLS/AUTH/…) avec mots
+ * de passe masqués ; renvoyé dans les deux cas (succès comme échec) pour le debug.
+ */
+export type SmtpTestConnectionResponse = {
+  detail: string;
+  success: boolean;
+  debug_log?: string;
 };
 
 export const organizationSettingsApi = {
   testSmtp: (id: UUID, payload: SmtpTestPayload = {}) =>
+    unwrap(http.post<SmtpTestConnectionResponse>(`organization-settings/${id}/test-smtp/`, payload)),
+  sendTestSmtpEmail: (id: UUID, payload: SmtpTestPayload = {}) =>
     unwrap(
-      http.post<{ detail: string; success: boolean }>(
-        `organization-settings/${id}/test-smtp/`,
+      http.post<SmtpTestConnectionResponse>(
+        `organization-settings/${id}/send-test-smtp-email/`,
         payload,
       ),
     ),
@@ -126,6 +144,22 @@ export const apiServices = {
     ...usersBase,
     invite: (payload: InviteUserPayload) =>
       unwrap(http.post<InviteUserResponse>('users/invite/', payload)),
+    resendInvitation: (id: number) =>
+      unwrap(
+        http.post<InviteUserResponse>(`users/${id}/resend-invitation/`, {}),
+      ),
+    /**
+     * Admin-triggered password reset. Generates uid+token server-side and mails
+     * the usual reset link (same template as « mot de passe oublié »).
+     */
+    sendPasswordReset: (id: number) =>
+      unwrap(
+        http.post<{
+          user: DjangoUser;
+          password_reset_email_sent: boolean;
+          email_delivery?: EmailDeliveryKind;
+        }>(`users/${id}/send-password-reset/`, {}),
+      ),
   },
   sites: createCrudService<Site>('sites'),
   agencies: createCrudService<Agency>('agencies'),

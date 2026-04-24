@@ -1,28 +1,77 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   BellRing,
+  CheckCircle2,
   Cloud,
   Database,
+  FlaskConical,
   HardHat,
   History,
+  Info,
+  Lightbulb,
   Loader2,
   Mail,
   MapPin,
   Network,
   Package,
+  RotateCcw,
   Ruler,
+  Send,
   Shield,
+  Terminal,
   Warehouse,
   X,
 } from 'lucide-react';
 
+import { useCurrentUser } from '@/context/CurrentUserContext';
 import { apiServices, organizationSettingsApi, type SmtpTestPayload } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { Integration, OrganizationSettings } from '@/types/api';
 import type { UUID } from '@/types/common';
 
 type SmtpEncryption = 'starttls' | 'ssl' | 'none';
+
+/** Form slice for SMTP; SSL and STARTTLS are mutually exclusive in the UI. */
+type SmtpFormDraft = {
+  smtp_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_use_tls: boolean;
+  smtp_use_ssl: boolean;
+  smtp_user: string;
+  smtp_from_email: string;
+};
+
+/** Valeurs par défaut du formulaire SMTP quand aucun `OrganizationSettings` n’est en base. */
+const EMPTY_SMTP_DRAFT: SmtpFormDraft = {
+  smtp_enabled: false,
+  smtp_host: '',
+  smtp_port: 587,
+  smtp_use_tls: true,
+  smtp_use_ssl: false,
+  smtp_user: '',
+  smtp_from_email: '',
+};
+
+function orgToSmtpDraft(row: OrganizationSettings): SmtpFormDraft {
+  const ssl = Boolean(row.smtp_use_ssl);
+  return {
+    smtp_enabled: row.smtp_enabled,
+    smtp_host: row.smtp_host ?? '',
+    smtp_port: row.smtp_port ?? 587,
+    smtp_use_tls: ssl ? false : Boolean(row.smtp_use_tls),
+    smtp_use_ssl: ssl,
+    smtp_user: row.smtp_user ?? '',
+    smtp_from_email: row.smtp_from_email ?? '',
+  };
+}
+
+function clampedSmtpPortFromDraft(d: SmtpFormDraft): number {
+  return Number.isFinite(d.smtp_port) && d.smtp_port >= 1 && d.smtp_port <= 65535
+    ? d.smtp_port
+    : 587;
+}
 
 function smtpEncryptionFromDraft(d: {
   smtp_use_tls: boolean;
@@ -38,15 +87,24 @@ function smtpEncryptionFromDraft(d: {
 }
 
 export default function SettingsPage() {
+  const { me } = useCurrentUser();
   const [org, setOrg] = useState<OrganizationSettings | null>(null);
   const [orgId, setOrgId] = useState<UUID | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [formMsg, setFormMsg] = useState<string | null>(null);
+  /** Texte brut renvoyé par le test SMTP (réponse EHLO/HELO du serveur). */
+  /**
+   * Transcript complet de la session smtplib (banner + EHLO + STARTTLS + AUTH + QUIT, ou sendmail).
+   * Les identifiants AUTH sont masqués côté serveur.
+   */
+  const [smtpDebugLog, setSmtpDebugLog] = useState<string | null>(null);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [draft, setDraft] = useState({
+  const [testingEmailSend, setTestingEmailSend] = useState(false);
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [draft, setDraft] = useState<SmtpFormDraft>({
     smtp_enabled: false,
     smtp_host: '',
     smtp_port: 587,
@@ -57,10 +115,12 @@ export default function SettingsPage() {
   });
   const [smtpPassword, setSmtpPassword] = useState('');
   const [smtpModalOpen, setSmtpModalOpen] = useState(false);
+  const smtpModalOpenRef = useRef(false);
 
   const openSmtpModal = () => {
     setFormErr(null);
     setFormMsg(null);
+    setSmtpDebugLog(null);
     setSmtpModalOpen(true);
   };
 
@@ -68,30 +128,99 @@ export default function SettingsPage() {
     setSmtpModalOpen(false);
   };
 
+  /**
+   * Réinitialise le formulaire aux valeurs enregistrées côté serveur ; à défaut (pas
+   * encore de ligne `OrganizationSettings`), retombe sur les défauts vides afin que
+   * le bouton soit toujours utile pour « tout effacer » pendant une première config.
+   */
+  const resetSmtpFormFromServer = () => {
+    const next = org ? orgToSmtpDraft(org) : EMPTY_SMTP_DRAFT;
+    setDraft(next);
+    setSmtpPortText(String(clampedSmtpPortFromDraft(next)));
+    setSmtpPassword('');
+    setTestEmailTo('');
+    setFormErr(null);
+    setSmtpDebugLog(null);
+    setFormMsg(
+      org
+        ? 'Formulaire réinitialisé aux valeurs enregistrées.'
+        : 'Formulaire remis à zéro.',
+    );
+  };
+
+  /**
+   * Ports « canoniques » (25/465/587). Si le port actuel est l’un d’eux, on le bascule
+   * vers celui du nouveau mode — sinon on laisse la valeur saisie à la main (ex. 2525,
+   * 1025). Sans ça, la séquence TLS → Aucun (25) → SSL laissait le champ figé à 25
+   * parce que chaque branche ne testait qu’une seule valeur de départ.
+   */
+  const CANONICAL_SMTP_PORTS = new Set([25, 465, 587]);
+
   const setSmtpEncryption = (mode: SmtpEncryption) => {
     setDraft((d) => {
       const next = { ...d };
       if (mode === 'starttls') {
         next.smtp_use_tls = true;
         next.smtp_use_ssl = false;
-        if (d.smtp_port === 465) {
-          next.smtp_port = 587;
-        }
       } else if (mode === 'ssl') {
         next.smtp_use_tls = false;
         next.smtp_use_ssl = true;
-        if (d.smtp_port === 587) {
-          next.smtp_port = 465;
-        }
       } else {
         next.smtp_use_tls = false;
         next.smtp_use_ssl = false;
+      }
+      if (CANONICAL_SMTP_PORTS.has(d.smtp_port)) {
+        next.smtp_port = mode === 'none' ? 25 : mode === 'ssl' ? 465 : 587;
       }
       return next;
     });
   };
 
   const smtpEnc = smtpEncryptionFromDraft(draft);
+
+  const smtpPortDisplay = clampedSmtpPortFromDraft(draft);
+
+  /** Par défaut selon le mode (aligné sur setSmtpEncryption). */
+  const defaultPortForEnc = (enc: SmtpEncryption) =>
+    enc === 'none' ? 25 : enc === 'ssl' ? 465 : 587;
+
+  /** Saisie texte : évite les bugs d’<input type="number"> (valeur figée) et lie le vidage au mode. */
+  const [smtpPortText, setSmtpPortText] = useState('');
+
+  useLayoutEffect(() => {
+    if (!smtpModalOpen) {
+      return;
+    }
+    // Uniquement à l’ouverture ou quand le mode TLS/SSL/Aucun change (pas à chaque frappe de port,
+    // sinon l’<input> number contrôlé se bloquait souvent en « Aucun »).
+    setSmtpPortText(String(smtpPortDisplay));
+    // smtpPortDisplay vient du draft le plus récent au moment de ce rendu
+  }, [smtpModalOpen, smtpEnc]);
+
+  const onSmtpPortTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digits = e.target.value.replace(/\D/g, '');
+    setSmtpPortText(digits);
+    if (digits === '') {
+      return;
+    }
+    const n = parseInt(digits, 10);
+    if (Number.isNaN(n)) {
+      return;
+    }
+    setDraft((d) => ({ ...d, smtp_port: Math.min(65535, Math.max(1, n)) }));
+  };
+
+  const onSmtpPortTextBlur = () => {
+    if (smtpPortText === '') {
+      const p = defaultPortForEnc(smtpEnc);
+      setSmtpPortText(String(p));
+      setDraft((d) => ({ ...d, smtp_port: p }));
+    }
+  };
+
+  useEffect(() => {
+    smtpModalOpenRef.current = smtpModalOpen;
+  }, [smtpModalOpen]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -105,17 +234,12 @@ export default function SettingsPage() {
       setOrg(row);
       if (row) {
         setOrgId(row.id);
-        const ssl = Boolean(row.smtp_use_ssl);
-        setDraft({
-          smtp_enabled: row.smtp_enabled,
-          smtp_host: row.smtp_host ?? '',
-          smtp_port: row.smtp_port ?? 587,
-          smtp_use_tls: ssl ? false : Boolean(row.smtp_use_tls),
-          smtp_use_ssl: ssl,
-          smtp_user: row.smtp_user ?? '',
-          smtp_from_email: row.smtp_from_email ?? '',
-        });
-        setSmtpPassword('');
+        // Ne pas écraser le formulaire (chiffrement, etc.) ni le mot de passe saisi
+        // si le chargement initial se termine pendant que le modal est ouvert.
+        if (!smtpModalOpenRef.current) {
+          setDraft(orgToSmtpDraft(row));
+          setSmtpPassword('');
+        }
       } else {
         setOrgId(null);
       }
@@ -131,6 +255,13 @@ export default function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const addr = me?.user.email?.trim();
+    if (addr) {
+      setTestEmailTo((prev) => (prev.trim() ? prev : addr));
+    }
+  }, [me?.user.email]);
 
   useEffect(() => {
     if (!smtpModalOpen) {
@@ -162,6 +293,7 @@ export default function SettingsPage() {
     }
     setFormErr(null);
     setFormMsg(null);
+    setSmtpDebugLog(null);
     setSaving(true);
     try {
       const payload: Partial<OrganizationSettings> = { ...draft };
@@ -170,6 +302,9 @@ export default function SettingsPage() {
       }
       const updated = await apiServices.organizationSettings.patch(orgId, payload);
       setOrg(updated);
+      const nextDraft = orgToSmtpDraft(updated);
+      setDraft(nextDraft);
+      setSmtpPortText(String(clampedSmtpPortFromDraft(nextDraft)));
       setSmtpPassword('');
       setFormMsg('Paramètres e-mail enregistrés.');
     } catch (err) {
@@ -201,6 +336,7 @@ export default function SettingsPage() {
     }
     setFormErr(null);
     setFormMsg(null);
+    setSmtpDebugLog(null);
     if (!draft.smtp_enabled) {
       setFormErr(
         'Cochez « Activer l’envoi par SMTP » pour tester la configuration (le test utilise les valeurs du formulaire).',
@@ -209,6 +345,16 @@ export default function SettingsPage() {
     }
     if (!draft.smtp_host.trim()) {
       setFormErr('Indiquez l’hôte SMTP (ex. smtp.fournisseur.com) avant de tester.');
+      return;
+    }
+    if (
+      draft.smtp_user.trim() &&
+      !smtpPassword.trim() &&
+      !org?.smtp_has_password
+    ) {
+      setFormErr(
+        'Avec un identifiant SMTP, saisissez le mot de passe d’application pour tester, ou enregistrez d’abord un mot de passe (bouton Enregistrer) pour réutiliser celui stocké.',
+      );
       return;
     }
     setTesting(true);
@@ -220,19 +366,25 @@ export default function SettingsPage() {
         smtp_use_tls: draft.smtp_use_tls,
         smtp_use_ssl: draft.smtp_use_ssl,
         smtp_user: draft.smtp_user,
+        smtp_from_email: draft.smtp_from_email.trim(),
       };
-      if (smtpPassword) {
+      if (smtpPassword.trim()) {
         payload.smtp_password = smtpPassword;
       }
       const res = await organizationSettingsApi.testSmtp(orgId, payload);
+      const log = (res.debug_log ?? '').trim();
+      setSmtpDebugLog(log || null);
       if (res.success) {
-        setFormMsg(`Réussite — ${res.detail}`);
+        setFormMsg(res.detail);
       } else {
         setFormErr(res.detail);
       }
     } catch (err) {
+      // L'API renvoie aussi debug_log en 400 (ex. échec STARTTLS / AUTH) — on l'affiche.
       if (axios.isAxiosError(err) && err.response?.data) {
-        const d = err.response.data as { detail?: unknown };
+        const d = err.response.data as { detail?: unknown; debug_log?: unknown };
+        const log = typeof d.debug_log === 'string' ? d.debug_log.trim() : '';
+        setSmtpDebugLog(log || null);
         if (d.detail != null) {
           setFormErr(
             typeof d.detail === 'string' ? d.detail : Array.isArray(d.detail) ? d.detail.join(' ') : String(d.detail),
@@ -241,10 +393,88 @@ export default function SettingsPage() {
           setFormErr('Échec du test de connexion (réponse inattendue).');
         }
       } else {
+        setSmtpDebugLog(null);
         setFormErr('Échec du test (réseau ou serveur injoignable).');
       }
     } finally {
       setTesting(false);
+    }
+  };
+
+  const sendTestSmtpEmail = async () => {
+    if (!orgId) {
+      return;
+    }
+    setFormErr(null);
+    setFormMsg(null);
+    setSmtpDebugLog(null);
+    if (!draft.smtp_enabled) {
+      setFormErr(
+        'Cochez « Activer l’envoi par SMTP » et renseignez l’hôte pour envoyer un e-mail de test.',
+      );
+      return;
+    }
+    if (!draft.smtp_host.trim()) {
+      setFormErr('Indiquez l’hôte SMTP avant d’envoyer un e-mail de test.');
+      return;
+    }
+    if (!draft.smtp_from_email.trim()) {
+      setFormErr(
+        'Renseignez l’expéditeur (from) : l’e-mail de test utilise les mêmes champs que le formulaire.',
+      );
+      return;
+    }
+    if (
+      draft.smtp_user.trim() &&
+      !smtpPassword.trim() &&
+      !org?.smtp_has_password
+    ) {
+      setFormErr(
+        'Avec un identifiant SMTP, saisissez le mot de passe d’application pour l’e-mail de test, ou enregistrez d’abord un mot de passe (Enregistrer) pour réutiliser celui stocké.',
+      );
+      return;
+    }
+    setTestingEmailSend(true);
+    try {
+      const payload: SmtpTestPayload = {
+        smtp_enabled: draft.smtp_enabled,
+        smtp_host: draft.smtp_host.trim(),
+        smtp_port: draft.smtp_port,
+        smtp_use_tls: draft.smtp_use_tls,
+        smtp_use_ssl: draft.smtp_use_ssl,
+        smtp_user: draft.smtp_user,
+        smtp_from_email: draft.smtp_from_email.trim(),
+        to_email: testEmailTo.trim() || undefined,
+      };
+      if (smtpPassword.trim()) {
+        payload.smtp_password = smtpPassword;
+      }
+      const res = await organizationSettingsApi.sendTestSmtpEmail(orgId, payload);
+      const log = (res.debug_log ?? '').trim();
+      setSmtpDebugLog(log || null);
+      if (res.success) {
+        setFormMsg(res.detail);
+      } else {
+        setFormErr(res.detail);
+      }
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.data) {
+        const d = err.response.data as { detail?: unknown; debug_log?: unknown };
+        const log = typeof d.debug_log === 'string' ? d.debug_log.trim() : '';
+        setSmtpDebugLog(log || null);
+        if (d.detail != null) {
+          setFormErr(
+            typeof d.detail === 'string' ? d.detail : Array.isArray(d.detail) ? d.detail.join(' ') : String(d.detail),
+          );
+        } else {
+          setFormErr('Échec de l’envoi de test (réponse inattendue).');
+        }
+      } else {
+        setSmtpDebugLog(null);
+        setFormErr('Échec de l’envoi de test (réseau ou serveur injoignable).');
+      }
+    } finally {
+      setTestingEmailSend(false);
     }
   };
 
@@ -460,199 +690,419 @@ export default function SettingsPage() {
       {/* Bottom Action Footer */}
       {smtpModalOpen && (
         <div
-          className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-6"
           role="presentation"
         >
           <div
-            className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] transition-opacity"
+            className="absolute inset-0 transition-opacity"
             onClick={closeSmtpModal}
             aria-hidden
           />
           <div
-            className="relative z-10 flex w-full sm:max-w-lg max-h-[min(100dvh,720px)] flex-col rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl border border-slate-100 sm:mt-0 mt-auto"
+            className="relative z-10 flex max-h-[min(100dvh,920px)] w-full max-w-[840px] flex-col overflow-hidden rounded-t-2xl border border-slate-200/80 bg-[#f7f9fb] shadow-[0_20px_40px_rgba(9,20,38,0.08)] sm:mt-0 sm:rounded-xl"
             role="dialog"
             aria-modal="true"
             aria-labelledby="smtp-dialog-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Mail className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <h3
+            <div className="shrink-0 border-b border-slate-200/80 bg-[#f7f9fb] px-6 pb-6 pt-8 sm:px-10 sm:pt-10">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2
                     id="smtp-dialog-title"
-                    className="font-headline text-lg font-bold text-primary truncate"
+                    className="font-headline text-xl font-bold tracking-tight text-primary sm:text-2xl"
                   >
-                    E-mail (SMTP)
-                  </h3>
-                  <p className="text-xs text-slate-500 line-clamp-2">
-                    E-mails transactionnels ; désactivé = configuration du serveur.
+                    Intégration e-mail (SMTP)
+                  </h2>
+                  <p className="mt-1 max-w-lg text-sm leading-relaxed text-slate-500">
+                    Configurez l’envoi des e-mails pour les invitations, alertes et réinitialisations de
+                    mot de passe. Si cette intégration est désactivée, la configuration du serveur
+                    s’applique.
                   </p>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeSmtpModal}
-                className="shrink-0 rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Fermer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <form
-              onSubmit={saveSmtp}
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6"
-            >
-              <div className="space-y-3 pb-2">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="rounded border-slate-300"
-                    checked={draft.smtp_enabled}
-                    onChange={(e) =>
-                      setDraft((d) => ({ ...d, smtp_enabled: e.target.checked }))
-                    }
-                  />
-                  <span className="text-sm font-medium text-primary">Activer l’envoi par SMTP</span>
-                </label>
-                <div className="grid grid-cols-1 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hôte</label>
-                    <input
-                      type="text"
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      placeholder="smtp.example.com"
-                      value={draft.smtp_host}
-                      onChange={(e) => setDraft((d) => ({ ...d, smtp_host: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Port</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      className="mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      value={draft.smtp_port}
-                      onChange={(e) =>
-                        setDraft((d) => ({ ...d, smtp_port: Number(e.target.value) || 587 }))
-                      }
-                    />
-                  </div>
-                  <div className="relative z-20 space-y-2">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Chiffrement
-                    </p>
-                    <p className="text-xs text-slate-500">Un seul mode à la fois (boutons, pas de cases à cocher).</p>
-                    <div
-                      className="grid grid-cols-1 gap-2 sm:grid-cols-3"
-                      role="radiogroup"
-                      aria-label="Chiffrement SMTP"
-                    >
-                      {(
-                        [
-                          { mode: 'starttls' as const, label: 'STARTTLS', hint: 'souvent 587' },
-                          { mode: 'ssl' as const, label: 'SSL (SMTPS)', hint: 'souvent 465' },
-                          { mode: 'none' as const, label: 'Aucun', hint: 'ex. 25' },
-                        ] as const
-                      ).map(({ mode, label, hint }) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          onClick={() => setSmtpEncryption(mode)}
-                          className={cn(
-                            'flex min-h-11 w-full flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-all',
-                            smtpEnc === mode
-                              ? 'border-primary bg-primary/5 text-primary shadow-sm ring-1 ring-primary/20'
-                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99]',
-                          )}
-                          aria-pressed={smtpEnc === mode}
-                        >
-                          <span className="text-sm font-bold leading-tight">{label}</span>
-                          <span
-                            className={cn(
-                              'text-[10px] font-medium',
-                              smtpEnc === mode ? 'text-primary/80' : 'text-slate-400',
-                            )}
-                          >
-                            {hint}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Utilisateur
-                    </label>
-                    <input
-                      type="text"
-                      autoComplete="off"
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      value={draft.smtp_user}
-                      onChange={(e) => setDraft((d) => ({ ...d, smtp_user: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Mot de passe
-                    </label>
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      placeholder={org?.smtp_has_password ? '•••••••• (inchangé si vide)' : ''}
-                      value={smtpPassword}
-                      onChange={(e) => setSmtpPassword(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Expéditeur (from)
-                    </label>
-                    <input
-                      type="email"
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      placeholder="noreply@example.com"
-                      value={draft.smtp_from_email}
-                      onChange={(e) => setDraft((d) => ({ ...d, smtp_from_email: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                {formErr && <p className="text-sm text-error">{formErr}</p>}
-                {formMsg && (
-                  <p className="text-sm font-medium text-green-800 bg-green-50 border border-green-200/80 rounded-lg px-3 py-2">
-                    {formMsg}
-                  </p>
-                )}
-              </div>
-              <div className="sticky bottom-0 -mx-5 flex flex-wrap gap-2 border-t border-slate-100 bg-white px-5 py-4 sm:-mx-6 sm:px-6">
                 <button
                   type="button"
                   onClick={closeSmtpModal}
-                  className="px-4 py-2.5 text-sm font-bold text-slate-600 rounded-xl border border-slate-200 hover:bg-slate-50"
+                  className="shrink-0 rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-200/50 hover:text-primary"
+                  aria-label="Fermer"
                 >
-                  Fermer
+                  <X className="h-5 w-5" />
                 </button>
-                <button
-                  type="button"
-                  disabled={testing || !orgId}
-                  onClick={() => void testSmtp()}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 border border-slate-200 text-sm font-bold rounded-xl text-primary hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {testing && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Tester la connexion
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving || !orgId}
-                  className="ml-auto inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-bold rounded-xl hover:bg-primary-container disabled:opacity-50"
-                >
-                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Enregistrer
-                </button>
+              </div>
+            </div>
+
+            <form
+              noValidate
+              onSubmit={saveSmtp}
+              className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#f7f9fb]"
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-8 sm:px-10 sm:pb-10">
+                <div className="grid grid-cols-12 gap-8 lg:gap-10">
+                  <div className="col-span-12 space-y-8 lg:col-span-7 lg:space-y-10">
+                    <div>
+                      <div className="flex items-center justify-between gap-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/60">
+                        <div>
+                          <h3 className="text-sm font-bold text-primary">Activer l’envoi d’e-mails</h3>
+                          <p className="mt-0.5 text-[11px] text-slate-500">
+                            Requis pour les invitations et la récupération de compte.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={draft.smtp_enabled}
+                          onClick={() =>
+                            setDraft((d) => ({ ...d, smtp_enabled: !d.smtp_enabled }))
+                          }
+                          className={cn(
+                            'flex h-6 w-11 shrink-0 items-center rounded-full p-[3px] transition',
+                            draft.smtp_enabled ? 'bg-primary' : 'bg-slate-300',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'h-5 w-5 rounded-full bg-white shadow transition',
+                              draft.smtp_enabled && 'ml-auto',
+                            )}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="border-b border-slate-200 pb-2 font-label text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                        Serveur SMTP
+                      </h3>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="sm:col-span-2">
+                          <label
+                            className="mb-2 block text-[11px] font-bold uppercase text-slate-500"
+                            htmlFor="smtp-dialog-host"
+                          >
+                            Serveur SMTP
+                          </label>
+                          <input
+                            id="smtp-dialog-host"
+                            name="smtp_host"
+                            type="text"
+                            autoComplete="off"
+                            className="w-full rounded-lg border-0 bg-[#e0e3e5] p-3 text-sm text-slate-800 ring-0 transition focus:bg-white focus:ring-2 focus:ring-primary/30"
+                            placeholder="smtp.votre-domaine.bj"
+                            value={draft.smtp_host}
+                            onChange={(e) => setDraft((d) => ({ ...d, smtp_host: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            className="mb-2 block text-[11px] font-bold uppercase text-slate-500"
+                            htmlFor="smtp-dialog-port"
+                          >
+                            Port
+                          </label>
+                          <input
+                            id="smtp-dialog-port"
+                            name="smtp_port"
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            maxLength={5}
+                            className="w-full rounded-lg border-0 bg-[#e0e3e5] p-3 text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary/30"
+                            value={smtpPortText}
+                            onChange={onSmtpPortTextChange}
+                            onBlur={onSmtpPortTextBlur}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            className="mb-2 block text-[11px] font-bold uppercase text-slate-500"
+                            htmlFor="smtp-dialog-security"
+                          >
+                            Sécurité
+                          </label>
+                          <select
+                            id="smtp-dialog-security"
+                            name="smtp_security"
+                            className="w-full rounded-lg border-0 bg-[#e0e3e5] p-3 text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary/30"
+                            value={smtpEnc}
+                            onChange={(e) =>
+                              setSmtpEncryption(e.target.value as SmtpEncryption)
+                            }
+                          >
+                            <option value="starttls">TLS (STARTTLS) — souvent 587</option>
+                            <option value="ssl">SSL (SMTPS) — souvent 465</option>
+                            <option value="none">Aucun — ex. 25</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                        Authentification
+                      </h3>
+                      <div className="grid grid-cols-1 gap-4">
+                        <div>
+                          <label
+                            className="mb-2 block text-[11px] font-bold uppercase text-slate-500"
+                            htmlFor="smtp-dialog-user"
+                          >
+                            Identifiant
+                          </label>
+                          <input
+                            id="smtp-dialog-user"
+                            name="smtp_user"
+                            type="text"
+                            autoComplete="username"
+                            className="w-full rounded-lg border-0 bg-[#e0e3e5] p-3 text-sm focus:bg-white focus:ring-2 focus:ring-primary/30"
+                            placeholder="Utilisateur ou e-mail"
+                            value={draft.smtp_user}
+                            onChange={(e) => setDraft((d) => ({ ...d, smtp_user: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            className="mb-2 block text-[11px] font-bold uppercase text-slate-500"
+                            htmlFor="smtp-dialog-password"
+                          >
+                            Mot de passe d’application
+                          </label>
+                          <input
+                            id="smtp-dialog-password"
+                            name="smtp_password"
+                            type="password"
+                            autoComplete="new-password"
+                            className="w-full rounded-lg border-0 bg-[#e0e3e5] p-3 text-sm focus:bg-white focus:ring-2 focus:ring-primary/30"
+                            placeholder={org?.smtp_has_password ? '•••••••• (inchangé si vide)' : ''}
+                            value={smtpPassword}
+                            onChange={(e) => setSmtpPassword(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="border-b border-slate-200 pb-2 font-label text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                        Expéditeur
+                      </h3>
+                      <div>
+                        <label
+                          className="mb-2 block text-[11px] font-bold uppercase text-slate-500"
+                          htmlFor="smtp-dialog-from"
+                        >
+                          Adresse (from)
+                        </label>
+                        <input
+                          id="smtp-dialog-from"
+                          name="smtp_from_email"
+                          type="email"
+                          autoComplete="email"
+                          className="w-full rounded-lg border-0 bg-[#e0e3e5] p-3 text-sm focus:bg-white focus:ring-2 focus:ring-primary/30"
+                          placeholder="notifications@entreprise.bj"
+                          value={draft.smtp_from_email}
+                          onChange={(e) => setDraft((d) => ({ ...d, smtp_from_email: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-span-12 space-y-5 lg:col-span-5">
+                    <div className="space-y-4 rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold uppercase text-primary">Statut actuel</span>
+                        <span
+                          className={cn(
+                            'rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider',
+                            draft.smtp_enabled && draft.smtp_host.trim()
+                              ? 'border-emerald-200 bg-emerald-100 text-emerald-800'
+                              : 'border-slate-200 bg-slate-100 text-slate-600',
+                          )}
+                        >
+                          {draft.smtp_enabled && draft.smtp_host.trim() ? 'Configuré' : 'Incomplet'}
+                        </span>
+                      </div>
+                      <div className="space-y-3 border-t border-slate-100 pt-3 text-xs">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Dernière sauvegarde</span>
+                          <span className="text-right font-semibold text-slate-800">
+                            {org
+                              ? new Date(org.updated_at).toLocaleString('fr-FR', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <FlaskConical className="h-4 w-4 text-slate-500" />
+                        <span className="text-xs font-bold uppercase text-primary">Tester la connexion</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Vérifiez d’abord le protocole, puis l’envoi d’un e-mail de test.
+                      </p>
+                      <div>
+                        <label
+                          className="mb-1.5 block text-[11px] font-medium text-slate-500"
+                          htmlFor="smtp-dialog-test-to"
+                        >
+                          Destinataire e-mail de test
+                        </label>
+                        <input
+                          id="smtp-dialog-test-to"
+                          name="test_email_to"
+                          type="email"
+                          className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs focus:ring-2 focus:ring-primary/20"
+                          placeholder="Par défaut : votre adresse de connexion"
+                          value={testEmailTo}
+                          onChange={(e) => setTestEmailTo(e.target.value)}
+                          autoComplete="email"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          disabled={testing || testingEmailSend || !orgId}
+                          onClick={() => void testSmtp()}
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-[#e0e3e5] py-2.5 text-xs font-bold text-primary transition hover:bg-slate-300/80 disabled:opacity-50"
+                        >
+                          {testing ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Network className="h-3.5 w-3.5" />
+                          )}
+                          Connexion
+                        </button>
+                        <button
+                          type="button"
+                          disabled={testing || testingEmailSend || !orgId}
+                          onClick={() => void sendTestSmtpEmail()}
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-primary/20 bg-primary/5 py-2.5 text-xs font-bold text-primary transition hover:bg-primary/10 disabled:opacity-50"
+                        >
+                          {testingEmailSend ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Send className="h-3.5 w-3.5" />
+                          )}
+                          E-mail de test
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 rounded-xl bg-gradient-to-br from-[#091426] to-[#1e293b] p-5 text-white shadow-lg">
+                      <div className="flex items-center gap-2">
+                        <Lightbulb className="h-4 w-4 text-slate-200" />
+                        <span className="text-xs font-bold uppercase tracking-widest text-slate-200">
+                          Conseils
+                        </span>
+                      </div>
+                      <ul className="space-y-3 text-[11px] leading-relaxed text-slate-300">
+                        <li className="flex gap-2">
+                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span>
+                            Préférez un <strong className="text-slate-100">mot de passe d’application</strong>{' '}
+                            plutôt que le mot de passe du compte, lorsque le fournisseur le permet.
+                          </span>
+                        </li>
+                        <li className="flex gap-2">
+                          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span>
+                            Le port <strong className="text-slate-100">587 (STARTTLS)</strong> est le plus
+                            courant ; le <strong className="text-slate-100">465 (SSL)</strong> reste valide
+                            selon le fournisseur.
+                          </span>
+                        </li>
+                        <li className="flex gap-2">
+                          <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span>
+                            Vérifiez <strong className="text-slate-100">SPF / DKIM</strong> côté DNS pour la
+                            délivrabilité.
+                          </span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="col-span-12 space-y-3">
+                    {formErr && (
+                      <div className="rounded-lg border border-rose-200/80 bg-rose-50/90 px-3 py-2 text-sm text-rose-900">
+                        <p className="font-medium">{formErr}</p>
+                      </div>
+                    )}
+                    {formMsg && (
+                      <div className="rounded-lg border border-emerald-200/80 bg-emerald-50/90 px-3 py-2 text-sm text-emerald-900">
+                        <p className="font-medium">{formMsg}</p>
+                      </div>
+                    )}
+                    {smtpDebugLog && (
+                      <div className="overflow-hidden rounded-xl border border-slate-800/60 bg-slate-950 shadow-[0_10px_30px_rgba(2,6,23,0.25)]">
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 bg-slate-900/80 px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <Terminal className="h-3.5 w-3.5 text-emerald-300" />
+                            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                              Transcription SMTP
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              ({smtpDebugLog.split('\n').length} lignes · identifiants masqués)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard?.writeText(smtpDebugLog ?? '');
+                            }}
+                            className="rounded-md border border-slate-700/80 bg-slate-800/60 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-200 transition hover:bg-slate-700/80"
+                          >
+                            Copier
+                          </button>
+                        </div>
+                        <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-emerald-300">
+                          {smtpDebugLog}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="shrink-0 border-t border-slate-200/80 bg-[#eceef0] px-6 py-5 sm:px-10">
+                <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="button"
+                    onClick={resetSmtpFormFromServer}
+                    title={
+                      org
+                        ? 'Rétablir les valeurs actuellement enregistrées côté serveur'
+                        : 'Effacer tous les champs (aucune configuration enregistrée)'
+                    }
+                    className="inline-flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 transition hover:text-error sm:justify-start"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Réinitialiser
+                  </button>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:gap-3">
+                    <button
+                      type="button"
+                      onClick={closeSmtpModal}
+                      className="w-full rounded-lg border border-slate-300/80 bg-white px-5 py-3 text-xs font-bold text-slate-600 transition hover:bg-slate-100 sm:w-auto"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving || !orgId}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-[#091426] to-[#1e293b] px-7 py-3 text-xs font-bold text-white shadow-md transition active:scale-[0.99] disabled:opacity-50 sm:w-auto"
+                    >
+                      {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Enregistrer la configuration
+                    </button>
+                  </div>
+                </div>
               </div>
             </form>
           </div>
