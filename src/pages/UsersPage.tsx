@@ -1,24 +1,19 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
-import type { LucideIcon } from 'lucide-react';
 import {
   AlertTriangle,
   ArrowRight,
   Ban,
-  BookOpen,
   ChevronRight,
-  Construction,
   EllipsisVertical,
   Eye,
   History,
   KeyRound,
   Loader2,
-  Package,
   PauseCircle,
   ScanLine,
   Send,
-  Shield,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -27,50 +22,30 @@ import {
   UserCog,
   UserPlus,
   Users,
-  Warehouse,
   X,
 } from 'lucide-react';
 import InviteUserDialog from '@/components/InviteUserDialog';
+import UserScopeFieldsets from '@/components/UserScopeFieldsets';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import { apiServices } from '@/lib/api';
 import { describeEmailDelivery } from '@/lib/email-delivery';
+import {
+  ROLES,
+  defaultCapabilitiesForRole,
+  roleLabel,
+  rolePillClass,
+} from '@/lib/rbac';
 import { cn } from '@/lib/utils';
-import type { DjangoUser, Site, UserProfile, UserProfileRole } from '@/types/api';
+import type {
+  CreateUserProfileInput,
+  DjangoUser,
+  Project,
+  Site,
+  StorageLocation,
+  UserProfile,
+  UserProfileRole,
+} from '@/types/api';
 import type { UUID } from '@/types/common';
-
-const ROLE_CHOICES: { value: UserProfileRole; label: string }[] = [
-  { value: 'administrateur', label: 'Administrateur' },
-  { value: 'magasinier', label: 'Magasinier' },
-  { value: 'chef_chantier', label: 'Chef de chantier' },
-  { value: 'consultant', label: 'Consultant' },
-];
-
-const ROLE_CARD_META: { value: UserProfileRole; label: string; description: string; icon: LucideIcon }[] = [
-  {
-    value: 'administrateur',
-    label: 'Administrateur',
-    description: 'Accès complet à toutes les configurations et données de l’entreprise.',
-    icon: Shield,
-  },
-  {
-    value: 'magasinier',
-    label: 'Magasinier',
-    description: 'Gestion des flux physiques, réceptions et inventaires tournants.',
-    icon: Package,
-  },
-  {
-    value: 'chef_chantier',
-    label: 'Chef de chantier',
-    description: 'Demandes de transferts et consultation des stocks chantiers.',
-    icon: Construction,
-  },
-  {
-    value: 'consultant',
-    label: 'Consultant',
-    description: 'Consultation des données et rapports selon les habilitations.',
-    icon: BookOpen,
-  },
-];
 
 type PerimeterMode = 'all' | 'selected' | 'readonly';
 
@@ -89,13 +64,12 @@ type ControlRights = {
 };
 
 function defaultOperationalForRole(role: UserProfileRole): OperationalRights {
-  const admin = role === 'administrateur';
-  const mag = role === 'magasinier';
+  const c = defaultCapabilitiesForRole(role);
   return {
-    recordMovement: true,
-    validateInventory: admin,
-    startPhysicalInventory: admin || mag,
-    accessSettings: admin,
+    recordMovement: c.recordMovement,
+    validateInventory: c.validateMovement,
+    startPhysicalInventory: c.startPhysicalInventory,
+    accessSettings: c.accessSettings,
   };
 }
 
@@ -142,25 +116,6 @@ function OpSwitch({
       />
     </button>
   );
-}
-
-function roleLabel(role: UserProfileRole | null | undefined): string {
-  return ROLE_CHOICES.find((r) => r.value === role)?.label ?? '—';
-}
-
-function rolePillClass(role: UserProfileRole | null | undefined): string {
-  switch (role) {
-    case 'administrateur':
-      return 'bg-secondary-fixed text-on-secondary-fixed';
-    case 'magasinier':
-      return 'bg-primary-fixed text-on-primary-fixed';
-    case 'chef_chantier':
-      return 'bg-secondary-container/40 text-on-secondary-container';
-    case 'consultant':
-      return 'bg-slate-200 text-slate-700';
-    default:
-      return 'bg-slate-100 text-slate-500';
-  }
 }
 
 function displayName(u: DjangoUser): string {
@@ -331,6 +286,8 @@ export default function UsersPage() {
     role: UserProfileRole;
     job_title: string;
     site: UUID | null;
+    scoped_project_ids: UUID[];
+    scoped_storage_location_ids: UUID[];
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [rowBusy, setRowBusy] = useState<number | null>(null);
@@ -347,6 +304,8 @@ export default function UsersPage() {
     role: UserProfileRole;
     site: UUID | null;
     perimeter: PerimeterMode;
+    scoped_project_ids: UUID[];
+    scoped_storage_location_ids: UUID[];
   } | null>(null);
   const [showInventoryRiskModal, setShowInventoryRiskModal] = useState(false);
   const [inventoryRiskNote, setInventoryRiskNote] = useState('');
@@ -449,12 +408,20 @@ export default function UsersPage() {
       role,
       job_title: row.profile?.job_title ?? '',
       site,
+      scoped_project_ids: row.profile?.scoped_project_ids ?? [],
+      scoped_storage_location_ids: row.profile?.scoped_storage_location_ids ?? [],
     });
     setEditPerimeterMode(perimeter);
     setOperationalRights(defaultOperationalForRole(role));
     setControlRights(defaultControlRights());
     setNotifyByEmail(true);
-    setAccessEditSnapshot({ role, site, perimeter });
+    setAccessEditSnapshot({
+      role,
+      site,
+      perimeter,
+      scoped_project_ids: row.profile?.scoped_project_ids ?? [],
+      scoped_storage_location_ids: row.profile?.scoped_storage_location_ids ?? [],
+    });
     setShowInventoryRiskModal(false);
     setInventoryRiskNote('');
   };
@@ -482,12 +449,17 @@ export default function UsersPage() {
     }
     setSaving(true);
     try {
-      const accessPayload: Parameters<typeof apiServices.userProfiles.patch>[1] = {
+      // `satisfies` préserve le typage précis champ par champ (sinon
+      // `Partial<...>` rend `site`/`job_title` optionnels, ce qui casse
+      // le `create` ci-dessous qui les exige).
+      const accessPayload = {
         role: editForm.role,
         job_title: editForm.job_title,
         site: siteToSave,
+        scoped_project_ids: editForm.scoped_project_ids,
+        scoped_storage_location_ids: editForm.scoped_storage_location_ids,
         ...(notifyByEmail ? { notify_user: true as const } : {}),
-      };
+      } satisfies Partial<CreateUserProfileInput>;
       let savedProfile: Awaited<ReturnType<typeof apiServices.userProfiles.patch>> | null = null;
       if (edit.profile) {
         savedProfile = await apiServices.userProfiles.patch(edit.profile.id, accessPayload);
@@ -717,11 +689,21 @@ export default function UsersPage() {
   };
 
   const [siteOptions, setSiteOptions] = useState<Site[]>([]);
+  const [projectOptions, setProjectOptions] = useState<Project[]>([]);
+  const [storageOptions, setStorageOptions] = useState<StorageLocation[]>([]);
   useEffect(() => {
     void apiServices.sites
       .list()
       .then(setSiteOptions)
       .catch(() => setSiteOptions([]));
+    void apiServices.projects
+      .list()
+      .then(setProjectOptions)
+      .catch(() => setProjectOptions([]));
+    void apiServices.storageLocations
+      .list()
+      .then(setStorageOptions)
+      .catch(() => setStorageOptions([]));
   }, []);
 
   const menuRow = menuUserId != null ? rows.find((r) => r.user.id === menuUserId) : null;
@@ -1439,14 +1421,15 @@ export default function UsersPage() {
             </div>
 
             <div className="min-h-0 flex-1 space-y-10 overflow-y-auto overflow-x-hidden p-8 [scrollbar-color:theme(colors.surface-container-highest)_transparent] [scrollbar-width:thin]">
-              {operationalRights.validateInventory && editForm.role !== 'administrateur' ? (
+              {operationalRights.validateInventory &&
+              !defaultCapabilitiesForRole(editForm.role).validateMovement ? (
                 <div className="flex items-start gap-3 border-l-4 border-orange-500 bg-orange-50 p-4">
                   <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" />
                   <div className="text-sm text-orange-900">
                     <p className="font-bold">Attention : droits sensibles</p>
                     <p className="opacity-80">
-                      La validation d’écarts d’inventaire sans contre-signature est restreinte aux profils
-                      direction.
+                      La validation d’écarts d’inventaire sans contre-signature est habituellement
+                      réservée aux rôles Administrateur et Conducteur de travaux.
                     </p>
                   </div>
                 </div>
@@ -1470,7 +1453,7 @@ export default function UsersPage() {
                   Rôle
                 </h4>
                 <div className="space-y-3">
-                  {ROLE_CARD_META.map((meta) => {
+                  {ROLES.map((meta) => {
                     const sel = editForm.role === meta.value;
                     const Icon = meta.icon;
                     return (
@@ -1504,7 +1487,24 @@ export default function UsersPage() {
                           type="radio"
                           checked={sel}
                           onChange={() => {
-                            setEditForm((f) => f && { ...f, role: meta.value });
+                            const next = meta.value;
+                            setEditForm((f) => {
+                              if (!f) {
+                                return f;
+                              }
+                              const leaveTerrain =
+                                next !== 'chef_chantier' && next !== 'magasinier';
+                              return {
+                                ...f,
+                                role: next,
+                                ...(leaveTerrain
+                                  ? {
+                                      scoped_project_ids: [],
+                                      scoped_storage_location_ids: [],
+                                    }
+                                  : {}),
+                              };
+                            });
                             setOperationalRights(defaultOperationalForRole(meta.value));
                           }}
                         />
@@ -1591,6 +1591,40 @@ export default function UsersPage() {
                 </div>
               </section>
 
+              {editForm.role === 'chef_chantier' || editForm.role === 'magasinier' ? (
+                <section>
+                  <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em] text-outline">
+                    Périmètre métier (chantiers / dépôts)
+                  </h4>
+                  <p className="mb-4 text-xs text-on-surface-variant">
+                    Filtre les listes API (projets, stocks, mouvements). Laissez tout décoché
+                    pour le repli automatique (responsable chantier / responsable dépôt).
+                  </p>
+                  <UserScopeFieldsets
+                    role={editForm.role}
+                    projectOptions={projectOptions.map((p) => ({
+                      id: p.id,
+                      name: p.name,
+                      subtitle: p.reference ? `(${p.reference})` : undefined,
+                    }))}
+                    storageOptions={storageOptions.map((s) => ({
+                      id: s.id,
+                      name: s.name,
+                      subtitle: s.storage_type,
+                    }))}
+                    projectIds={editForm.scoped_project_ids}
+                    storageIds={editForm.scoped_storage_location_ids}
+                    onChangeProjects={(ids) =>
+                      setEditForm((f) => f && { ...f, scoped_project_ids: ids })
+                    }
+                    onChangeStorages={(ids) =>
+                      setEditForm((f) => f && { ...f, scoped_storage_location_ids: ids })
+                    }
+                    disabled={saving}
+                  />
+                </section>
+              ) : null}
+
               <section>
                 <h4 className="mb-4 text-[10px] font-bold uppercase tracking-[0.2em] text-outline">
                   Droits opérationnels
@@ -1639,7 +1673,7 @@ export default function UsersPage() {
                         on={operationalRights[k]}
                         onToggle={() => {
                           if (k === 'validateInventory' && !operationalRights.validateInventory) {
-                            if (editForm.role !== 'administrateur') {
+                            if (!defaultCapabilitiesForRole(editForm.role).validateMovement) {
                               setShowInventoryRiskModal(true);
                               return;
                             }
@@ -1743,6 +1777,52 @@ export default function UsersPage() {
                       })()}
                     </div>
                   </div>
+                  {accessEditSnapshot &&
+                  (editForm.role === 'chef_chantier' || editForm.role === 'magasinier') ? (
+                    <div className="border-t border-surface-container py-2 text-xs">
+                      <span className="text-secondary">Périmètre métier</span>
+                      <div className="mt-1 flex max-w-full flex-col gap-1 text-right">
+                        {editForm.role === 'chef_chantier' ? (
+                          <div>
+                            {editForm.scoped_project_ids.length !==
+                            accessEditSnapshot.scoped_project_ids.length ||
+                            !editForm.scoped_project_ids.every((id) =>
+                              accessEditSnapshot.scoped_project_ids.includes(id),
+                            ) ? (
+                              <>
+                                <span className="text-outline line-through">
+                                  {accessEditSnapshot.scoped_project_ids.length} chantier(s)
+                                </span>
+                                <ArrowRight className="mx-1 inline h-3 w-3 text-outline" />
+                              </>
+                            ) : null}
+                            <span className="font-bold text-primary">
+                              {editForm.scoped_project_ids.length} chantier(s) coché(s)
+                            </span>
+                          </div>
+                        ) : null}
+                        {editForm.role === 'magasinier' ? (
+                          <div>
+                            {editForm.scoped_storage_location_ids.length !==
+                              accessEditSnapshot.scoped_storage_location_ids.length ||
+                            !editForm.scoped_storage_location_ids.every((id) =>
+                              accessEditSnapshot.scoped_storage_location_ids.includes(id),
+                            ) ? (
+                              <>
+                                <span className="text-outline line-through">
+                                  {accessEditSnapshot.scoped_storage_location_ids.length} emplacement(s)
+                                </span>
+                                <ArrowRight className="mx-1 inline h-3 w-3 text-outline" />
+                              </>
+                            ) : null}
+                            <span className="font-bold text-primary">
+                              {editForm.scoped_storage_location_ids.length} emplacement(s) coché(s)
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </section>
               ) : null}
 
@@ -1753,17 +1833,38 @@ export default function UsersPage() {
                   <span className="text-sm font-bold text-white">Suggestion</span>
                 </div>
                 <p className="relative text-xs italic leading-relaxed text-white/80">
-                  {editForm.role === 'magasinier'
-                    ? 'Pour un profil magasinier, limitez l’accès direct aux chantiers pour réduire les erreurs de saisie à distance.'
-                    : editForm.role === 'administrateur'
-                      ? 'Vérifiez les comptes administrateurs : réservez-les aux personnes tenues de gouverner l’annuaire et la configuration.'
-                      : 'Adaptez le périmètre au besoin : un site ciblé suffit souvent pour les rôles terrain.'}
+                  {(() => {
+                    switch (editForm.role) {
+                      case 'administrateur':
+                        return 'Vérifiez les comptes administrateurs : réservez-les aux personnes tenues de gouverner l’annuaire et la configuration.';
+                      case 'conducteur_travaux':
+                        return 'Le conducteur de travaux a une vue multi-chantiers : laissez « Tous les sites » et activez la validation des mouvements.';
+                      case 'chef_chantier':
+                        return 'Pour un chef de chantier, restreignez l’accès au site rattaché à son chantier.';
+                      case 'magasinier':
+                        return 'Pour un magasinier, limitez l’accès au dépôt qu’il gère pour réduire les erreurs de saisie à distance.';
+                      case 'responsable_achats':
+                        return 'Le responsable achats n’a pas besoin d’enregistrer de mouvements ; concentrez ses droits sur le catalogue et les commandes.';
+                      case 'comptable':
+                        return 'Le comptable doit rester en lecture seule sur les stocks ; activez surtout les rapports financiers.';
+                      case 'controleur_gestion':
+                        return 'Pour le contrôleur de gestion, privilégiez la lecture multi-sites et l’accès aux rapports coûts/budget.';
+                      case 'ouvrier_technicien':
+                        return 'L’ouvrier/technicien utilise principalement le mobile : conservez le périmètre minimal (consultation et signalements).';
+                      default:
+                        return 'Adaptez le périmètre au besoin : un site ciblé suffit souvent pour les rôles terrain.';
+                    }
+                  })()}
                 </p>
                 <button
                   type="button"
                   className="relative mt-4 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-primary-fixed transition-colors hover:text-white"
                   onClick={() => {
-                    if (editForm.role === 'magasinier') {
+                    // Heuristique simple : si le rôle a une portée locale (site/chantier),
+                    // bascule en périmètre « site sélectionné » ; sinon, propose
+                    // « magasinier » comme rôle terrain par défaut.
+                    const localScopeRoles: UserProfileRole[] = ['magasinier', 'chef_chantier'];
+                    if (localScopeRoles.includes(editForm.role)) {
                       setEditPerimeterMode('selected');
                     } else {
                       setEditForm((f) => f && { ...f, role: 'magasinier' });
@@ -1841,7 +1942,7 @@ export default function UsersPage() {
                 aria-labelledby="inventory-risk-title"
               >
                 <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-full bg-orange-100">
-                  <Shield className="h-6 w-6 text-orange-600" />
+                  <ShieldCheck className="h-6 w-6 text-orange-600" />
                 </div>
                 <h3 id="inventory-risk-title" className="mb-2 text-xl font-bold text-primary">
                   Confirmation requise
@@ -1896,34 +1997,20 @@ export default function UsersPage() {
 
       <div className="mt-16 pt-12 border-t border-slate-200">
         <h3 className="text-2xl font-bold font-headline text-primary mb-8">Structure des rôles</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {[
-            {
-              title: 'Administrateur',
-              icon: Shield,
-              description:
-                "Contrôle étendu : utilisateurs, sites et accès applicatifs selon la configuration.",
-            },
-            {
-              title: 'Magasinier',
-              icon: Warehouse,
-              description: 'Gestion des stocks, mouvements et inventaires sur les dépôts.',
-            },
-            {
-              title: 'Chef de chantier',
-              icon: Construction,
-              description: 'Suivi des besoins matériaux et des affectations liées aux projets.',
-            },
-          ].map((role) => (
-            <div
-              key={role.title}
-              className="bg-slate-50 p-8 rounded-2xl border border-transparent hover:border-slate-200"
-            >
-              <role.icon className="w-10 h-10 text-primary mb-4" />
-              <h4 className="text-lg font-bold font-headline text-primary mb-2">{role.title}</h4>
-              <p className="text-sm text-slate-500 leading-relaxed">{role.description}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {ROLES.map((role) => {
+            const RoleIcon = role.icon;
+            return (
+              <div
+                key={role.value}
+                className="bg-slate-50 p-6 rounded-2xl border border-transparent hover:border-slate-200"
+              >
+                <RoleIcon className="w-9 h-9 text-primary mb-3" />
+                <h4 className="text-base font-bold font-headline text-primary mb-2">{role.label}</h4>
+                <p className="text-xs text-slate-500 leading-relaxed">{role.description}</p>
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -93,9 +93,16 @@ function unwrap<T>(promise: Promise<AxiosResponse<T>>): Promise<T> {
   return promise.then((response) => response.data);
 }
 
+/**
+ * R\u00e9ponse de `POST /auth/login/` et `POST /auth/refresh/`.
+ *
+ * Seul l'**access token** est renvoy\u00e9 dans le body ; le **refresh token**
+ * est pos\u00e9 par le backend dans un cookie httpOnly (`batirpro_refresh`)
+ * et n'est jamais accessible en JavaScript. Le payload utilisateur n'est
+ * plus retourn\u00e9 ici : le client appelle `meApi.get()` apr\u00e8s login.
+ */
 export type LoginResponse = {
-  token: string;
-  user: { id: number; username: string; email: string };
+  access: string;
 };
 
 function createCrudService<T, TCreate = CreateInput<T>, TPatch = PatchInput<T>>(
@@ -114,19 +121,38 @@ function createCrudService<T, TCreate = CreateInput<T>, TPatch = PatchInput<T>>(
 }
 
 export const authApi = {
-  login: (payload: { email: string; password: string }) =>
+  /**
+   * `remember=true` (d\u00e9faut) \u2192 cookie refresh persistant (Max-Age = TTL refresh).
+   * `remember=false` \u2192 cookie de session (effac\u00e9 \u00e0 la fermeture du navigateur).
+   */
+  login: (payload: { email: string; password: string; remember?: boolean }) =>
     unwrap(http.post<LoginResponse>('auth/login/', payload)),
+  /**
+   * Rafra\u00eechit l'access token \u00e0 partir du cookie httpOnly. Appel\u00e9 :
+   * - silencieusement au boot par `CurrentUserContext` pour restaurer la session ;
+   * - automatiquement par l'intercepteur axios sur 401.
+   */
+  refresh: () => unwrap(http.post<LoginResponse>('auth/refresh/', {})),
   logout: () => http.post('auth/logout/').then(() => undefined),
   requestPasswordReset: (payload: { email: string }) =>
     unwrap(http.post<{ detail: string }>('auth/password-reset/', payload)),
+  /**
+   * Réinitialisation (« oublié » ou lien envoyé par un admin) : jeton issu de
+   * `UserProfile.password_reset_token`, lien `?reset=`.
+   */
   confirmPasswordReset: (payload: {
-    uid: string;
-    token: string;
+    reset_token: string;
     new_password: string;
   }) =>
     unwrap(
       http.post<{ detail: string }>('auth/password-reset/confirm/', payload),
     ),
+  /**
+   * Activation initiale d’un compte créé par invitation (`UserProfile.invite_token`).
+   * Usage unique : le backend invalide le jeton et renseigne `activated_at`.
+   */
+  activate: (payload: { invite_token: string; new_password: string }) =>
+    unwrap(http.post<{ detail: string }>('auth/activate/', payload)),
 };
 
 export const meApi = {
@@ -149,8 +175,8 @@ export const apiServices = {
         http.post<InviteUserResponse>(`users/${id}/resend-invitation/`, {}),
       ),
     /**
-     * Admin-triggered password reset. Generates uid+token server-side and mails
-     * the usual reset link (same template as « mot de passe oublié »).
+     * Admin-triggered password reset : émet un jeton sur le profil et envoie
+     * le même e-mail que « mot de passe oublié » (`?reset=`).
      */
     sendPasswordReset: (id: number) =>
       unwrap(

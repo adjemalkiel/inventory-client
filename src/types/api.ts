@@ -6,11 +6,22 @@ export type StorageType =
   | 'zone_temporaire'
   | 'conteneur_mobile';
 
+/**
+ * Slug RBAC d'un rôle utilisateur (`Role.code` côté backend).
+ *
+ * **Source de vérité** : `inventory-backend/api/rbac.py::ROLE_DEFINITIONS`.
+ * Synchronisé manuellement avec `src/lib/rbac.ts` (libellés FR + descriptions).
+ * En cas d'évolution du catalogue, mettre à jour les deux côtés.
+ */
 export type UserProfileRole =
   | 'administrateur'
-  | 'magasinier'
+  | 'conducteur_travaux'
   | 'chef_chantier'
-  | 'consultant';
+  | 'magasinier'
+  | 'responsable_achats'
+  | 'comptable'
+  | 'controleur_gestion'
+  | 'ouvrier_technicien';
 
 export type ProjectType =
   | 'residentiel_collectif'
@@ -76,6 +87,10 @@ export interface DjangoUser {
 export interface UserProfile extends ApiAudit {
   user: UserId;
   role: UserProfileRole;
+  /** Chantiers assignés (périmètre RBAC) ; liste vide = repli manager/superviseur. */
+  scoped_project_ids?: UUID[];
+  /** Emplacements assignés (périmètre dépôt / stock chantier). */
+  scoped_storage_location_ids?: UUID[];
   site: UUID | null;
   job_title: string;
   phone?: string;
@@ -119,11 +134,23 @@ export interface MeProfile {
   pref_date_format: MePrefDateFormat;
   pref_display_density: MePrefDisplayDensity;
   pref_currency: MePrefCurrency;
+  scoped_project_ids: UUID[];
+  scoped_storage_location_ids: UUID[];
 }
 
 export interface MeResponse {
   user: MeUser;
   profile: MeProfile;
+  /**
+   * Codes de permission effectifs de l'utilisateur (drivés du rôle RBAC
+   * via `inventory-backend/api/rbac.py::get_user_permissions`).
+   *
+   * Liste vide pour un utilisateur sans rôle ; catalogue complet pour les
+   * superusers Django et pour le rôle `administrateur`. Le frontend s'en
+   * sert pour piloter la visibilité d'actions (ex : `users.manage`,
+   * `movement.validate`, `reports.financial`).
+   */
+  permissions: string[];
 }
 
 export type MeUpdatePayload = {
@@ -142,7 +169,15 @@ export type MeUpdatePayload = {
 
 export interface CreateUserProfileInput {
   user: UserId;
-  role: UserProfileRole;
+  /**
+   * Slug du rôle RBAC. Optionnel à la création du profil ; côté serveur, si
+   * absent, aucun `UserRole` n'est créé (le profil est seulement « invité »
+   * sans rôle effectif). Pour retirer un rôle existant, utiliser `DELETE
+   * /api/user-roles/{id}/`.
+   */
+  role?: UserProfileRole;
+  scoped_project_ids?: UUID[];
+  scoped_storage_location_ids?: UUID[];
   site: UUID | null;
   job_title: string;
   invite_token?: string;
@@ -159,6 +194,10 @@ export type InviteUserPayload = {
   site: UUID | null;
   job_title?: string;
   phone?: string;
+  /** Périmètre chantier (ex. chef de chantier) ; repli API si omis. */
+  scoped_project_ids?: UUID[];
+  /** Périmètre dépôts (ex. magasinier) ; repli API si omis. */
+  scoped_storage_location_ids?: UUID[];
 };
 
 /**

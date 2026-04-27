@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, type Location } from 'react-router-dom';
 import axios from 'axios';
 import { HardHat, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
 
-import { setStoredToken } from '@/lib/auth';
-import { authApi } from '@/lib/api';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 
 function parseAuthErrorMessage(err: unknown): string {
@@ -20,9 +18,18 @@ function parseAuthErrorMessage(err: unknown): string {
   return "Impossible de se connecter. Vérifiez que l'API est accessible.";
 }
 
+function postLoginPath(loc: { state: unknown }): string {
+  const from = (loc.state as { from?: Location } | null | undefined)?.from;
+  if (from && from.pathname) {
+    return `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`;
+  }
+  return '/dashboard';
+}
+
 export default function LoginPage() {
-  const { refresh: refreshCurrentUser } = useCurrentUser();
+  const { login } = useCurrentUser();
   const navigate = useNavigate();
+  const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,10 +42,8 @@ export default function LoginPage() {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await authApi.login({ email: email.trim(), password });
-      setStoredToken(res.token, remember);
-      await refreshCurrentUser();
-      navigate('/dashboard');
+      await login(email.trim(), password, remember);
+      navigate(postLoginPath(location), { replace: true });
     } catch (err) {
       setError(parseAuthErrorMessage(err));
     } finally {
@@ -174,7 +179,7 @@ export default function LoginPage() {
                   type="checkbox"
                   className="w-4 h-4 md:w-5 md:h-5 rounded-md border-outline-variant bg-surface-container-highest text-primary focus:ring-primary/20 transition-all"
                   checked={remember}
-                  onChange={(e) => setRemember(e.targetChecked)}
+                  onChange={(e) => setRemember(e.target.checked)}
                   disabled={isSubmitting}
                 />
                 <span className="ml-3 text-xs md:text-sm text-on-surface-variant group-hover:text-on-surface transition-colors">Rester connecté</span>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -28,10 +28,16 @@ const navItems = [
   { icon: ClipboardCheck, label: 'Inventaires physiques', path: '/audits' },
 ];
 
-const systemItems = [
+const systemItems: {
+  icon: typeof LayoutDashboard;
+  label: string;
+  path: string;
+  /** Si défini, au moins un code requis (aligné sur `RequirePermission` / API). */
+  anyOf?: string[];
+}[] = [
   { icon: Bot, label: 'Assistant IA', path: '/ai-assistant' },
-  { icon: Users, label: 'Utilisateurs', path: '/users' },
-  { icon: Settings, label: 'Paramètres', path: '/settings' },
+  { icon: Users, label: 'Utilisateurs', path: '/users', anyOf: ['users.view', 'users.manage'] },
+  { icon: Settings, label: 'Paramètres', path: '/settings', anyOf: ['settings.manage'] },
 ];
 
 interface SidebarProps {
@@ -40,7 +46,15 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
-  const { me, status } = useCurrentUser();
+  const { me, status, hasPermission } = useCurrentUser();
+
+  const systemItemsVisible = useMemo(
+    () =>
+      systemItems.filter(
+        (item) => !item.anyOf?.length || item.anyOf.some((c) => hasPermission(c)),
+      ),
+    [hasPermission],
+  );
   const sideName = me ? userDisplayName(me.user) : null;
   const sideLine2 = me
     ? me.profile.job_title || me.profile.role_label || '—'
@@ -107,7 +121,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Système</p>
           </div>
 
-          {systemItems.map((item) => (
+          {systemItemsVisible.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

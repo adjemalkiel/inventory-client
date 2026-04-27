@@ -23,7 +23,7 @@ import {
 
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import { apiServices, meApi } from '@/lib/api';
-import { clearStoredToken } from '@/lib/auth';
+import { clearAccessToken } from '@/lib/auth';
 import { userDisplayName, userInitials } from '@/lib/userDisplay';
 import { cn } from '@/lib/utils';
 import type {
@@ -202,7 +202,7 @@ export default function ProfilePage() {
       setSites(siteList);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
-        clearStoredToken();
+        clearAccessToken();
         navigate('/login', { replace: true });
         return;
       }
@@ -246,7 +246,7 @@ export default function ProfilePage() {
       await refreshCurrentUser();
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
-        clearStoredToken();
+        clearAccessToken();
         navigate('/login', { replace: true });
         return;
       }
@@ -289,7 +289,7 @@ export default function ProfilePage() {
       await refreshCurrentUser();
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
-        clearStoredToken();
+        clearAccessToken();
         navigate('/login', { replace: true });
         return;
       }
@@ -329,7 +329,7 @@ export default function ProfilePage() {
       await refreshCurrentUser();
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
-        clearStoredToken();
+        clearAccessToken();
         navigate('/login', { replace: true });
         return;
       }

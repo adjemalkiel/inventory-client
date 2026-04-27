@@ -64,13 +64,20 @@ function RuleRow({
 export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const uid = searchParams.get('uid')?.trim() ?? '';
-  const token = searchParams.get('token')?.trim() ?? '';
+  /** Invitation : `POST /auth/activate/` avec `invite_token`. */
+  const inviteToken = searchParams.get('invite')?.trim() ?? '';
+  /** Mot de passe oublié / reset admin : `POST …/password-reset/confirm/` avec `reset_token`. */
+  const resetToken = searchParams.get('reset')?.trim() ?? '';
   const emailParam = searchParams.get('email')?.trim() ?? '';
 
+  const isInvitationFlow = Boolean(inviteToken);
+
   const canSubmit = useMemo(
-    () => Boolean(uid && token),
-    [uid, token],
+    () =>
+      isInvitationFlow
+        ? Boolean(inviteToken)
+        : Boolean(resetToken),
+    [isInvitationFlow, inviteToken, resetToken],
   );
 
   const [newPassword, setNewPassword] = useState('');
@@ -96,16 +103,24 @@ export default function ResetPasswordPage() {
       return;
     }
     if (!canSubmit) {
-      setError('Lien invalide. Demandez un nouveau e-mail de réinitialisation.');
+      setError(
+        isInvitationFlow
+          ? "Lien d'invitation invalide. Demandez à un administrateur un nouvel e-mail."
+          : 'Lien invalide. Demandez un nouveau e-mail de réinitialisation.',
+      );
       return;
     }
     setSaving(true);
     try {
-      const res = await authApi.confirmPasswordReset({
-        uid,
-        token,
-        new_password: newPassword,
-      });
+      const res = isInvitationFlow
+        ? await authApi.activate({
+            invite_token: inviteToken,
+            new_password: newPassword,
+          })
+        : await authApi.confirmPasswordReset({
+            reset_token: resetToken,
+            new_password: newPassword,
+          });
       setSuccess(res.detail);
       setTimeout(() => navigate('/login', { replace: true }), 2200);
     } catch (err) {
@@ -143,10 +158,14 @@ export default function ResetPasswordPage() {
             <div className="p-8 md:p-12">
               <div className="mb-8 md:mb-10">
                 <h1 className="text-primary font-headline text-[1.75rem] font-bold leading-tight mb-3">
-                  Définir un nouveau mot de passe
+                  {isInvitationFlow
+                    ? 'Activer votre compte'
+                    : 'Définir un nouveau mot de passe'}
                 </h1>
                 <p className="text-on-surface-variant font-sans leading-relaxed mb-6 text-sm md:text-base">
-                  Choisissez un mot de passe robuste pour sécuriser votre compte.
+                  {isInvitationFlow
+                    ? 'Choisissez un mot de passe pour finaliser votre invitation et accéder à Bâtir Pro.'
+                    : 'Choisissez un mot de passe robuste pour sécuriser votre compte.'}
                 </p>
                 <div className="bg-surface-container-low px-4 py-3 rounded-lg flex items-center gap-3 min-w-0">
                   <UserCircle
@@ -165,8 +184,9 @@ export default function ResetPasswordPage() {
 
               {!canSubmit && (
                 <p className="text-sm text-error mb-6" role="alert">
-                  Lien incomplet ou expiré. Ouvrez le lien reçu par e-mail ou
-                  retournez à la connexion pour en demander un nouveau.
+                  {isInvitationFlow
+                    ? "Lien d'invitation incomplet ou expiré. Contactez un administrateur pour recevoir un nouvel e-mail."
+                    : 'Lien incomplet ou expiré. Ouvrez le lien reçu par e-mail ou retournez à la connexion pour en demander un nouveau.'}
                 </p>
               )}
 
@@ -282,7 +302,9 @@ export default function ResetPasswordPage() {
                       <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
                       <>
-                        Mettre à jour le mot de passe
+                        {isInvitationFlow
+                          ? 'Activer mon compte'
+                          : 'Mettre à jour le mot de passe'}
                         <ArrowRight className="w-4 h-4" />
                       </>
                     )}

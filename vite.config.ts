@@ -10,7 +10,7 @@ export default defineConfig(({mode}) => {
     // Expose les variables préfixées `PUBLIC_` à `import.meta.env` (en plus
     // du préfixe `VITE_` par défaut). Indispensable pour que
     // `PUBLIC_API_URL` soit réellement lu par src/lib/api/http.ts au lieu
-    // de retomber silencieusement sur le fallback `/api/`.
+    // de retomber silencieusement sur le fallback `/api/v1/`.
     envPrefix: ['VITE_', 'PUBLIC_'],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

@@ -1,14 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
-import type { LucideIcon } from 'lucide-react';
 import {
   ArrowRight,
   Badge,
-  BarChart3,
   Check,
   CheckCircle2,
-  Construction,
   Eye,
   LayoutGrid,
   Loader2,
@@ -17,62 +14,28 @@ import {
   MapPin,
   Send,
   Settings,
-  Shield,
   Sparkles,
   UserPlus,
   Verified,
-  Warehouse,
   X,
 } from 'lucide-react';
 
 import { apiServices } from '@/lib/api';
 import { describeEmailDelivery } from '@/lib/email-delivery';
+import {
+  ROLES,
+  defaultCapabilitiesForRole,
+  getRoleMeta,
+  suggestRoleFromFunction,
+} from '@/lib/rbac';
+import UserScopeFieldsets from '@/components/UserScopeFieldsets';
 import { cn } from '@/lib/utils';
-import type { DjangoUser, Site, UserProfile, UserProfileRole } from '@/types/api';
+import type { DjangoUser, Project, Site, StorageLocation, UserProfile, UserProfileRole } from '@/types/api';
 import type { UUID } from '@/types/common';
-
-const ROLE_OPTIONS: { value: UserProfileRole; label: string }[] = [
-  { value: 'administrateur', label: 'Administrateur' },
-  { value: 'magasinier', label: 'Magasinier' },
-  { value: 'chef_chantier', label: 'Chef de chantier' },
-  { value: 'consultant', label: 'Consultant' },
-];
-
-/** Rôle (carte) : libellés alignés sur le gabarit « Direction » = consultant côté API. */
-const ROLE_CARDS: {
-  value: UserProfileRole;
-  label: string;
-  description: string;
-  cardIcon: LucideIcon;
-}[] = [
-  {
-    value: 'administrateur',
-    label: 'Administrateur',
-    description: 'Accès complet à la configuration, aux utilisateurs et aux données.',
-    cardIcon: Shield,
-  },
-  {
-    value: 'magasinier',
-    label: 'Magasinier',
-    description: 'Gestion des stocks, mouvements et inventaires.',
-    cardIcon: Warehouse,
-  },
-  {
-    value: 'chef_chantier',
-    label: 'Chef de chantier',
-    description: 'Consultation des affectations, suivi des besoins et alertes chantier.',
-    cardIcon: Construction,
-  },
-  {
-    value: 'consultant',
-    label: 'Direction',
-    description: 'Vue globale, indicateurs, rapports et analyse.',
-    cardIcon: BarChart3,
-  },
-];
 
 type PerimeterMode = 'all' | 'selected' | 'readonly';
 
+/** Sous-ensemble des capacités affichées dans le formulaire d'invitation. */
 type StepOperational = {
   recordMovement: boolean;
   validateMovement: boolean;
@@ -80,30 +43,15 @@ type StepOperational = {
 };
 
 function defaultOperationalForRole(role: UserProfileRole): StepOperational {
-  const admin = role === 'administrateur';
-  const mag = role === 'magasinier';
+  const c = defaultCapabilitiesForRole(role);
   return {
-    recordMovement: true,
-    validateMovement: admin || mag,
-    accessSettings: admin,
+    // Politique invite : on autorise par défaut l'enregistrement d'un mouvement
+    // dès qu'un rôle a au moins une capacité de saisie/lecture sur l'inventaire,
+    // pour que l'écran « Droits opérationnels » ait une valeur initiale utile.
+    recordMovement: c.recordMovement || c.startPhysicalInventory,
+    validateMovement: c.validateMovement,
+    accessSettings: c.accessSettings,
   };
-}
-
-function suggestRoleFromFunction(fn: string): UserProfileRole | null {
-  const t = fn.toLowerCase();
-  if (/magasin|stock|logist|inventaire|manutention/.test(t)) {
-    return 'magasinier';
-  }
-  if (/admin|direction|directeur|dsi|rh|ressources humaines/.test(t)) {
-    return 'administrateur';
-  }
-  if (/chantier|conducteur|travaux|génie/.test(t)) {
-    return 'chef_chantier';
-  }
-  if (/analyste|analyse|financ|comptab|consult|rapport/.test(t)) {
-    return 'consultant';
-  }
-  return null;
 }
 
 function OpToggle({
@@ -251,6 +199,10 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
   const [perimeterMode, setPerimeterMode] = useState<PerimeterMode>('all');
   const [operational, setOperational] = useState<StepOperational>(() => defaultOperationalForRole('magasinier'));
   const [sites, setSites] = useState<Site[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
+  const [scopeProjectIds, setScopeProjectIds] = useState<UUID[]>([]);
+  const [scopeStorageIds, setScopeStorageIds] = useState<UUID[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadSitesError, setLoadSitesError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -266,7 +218,22 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
       .list()
       .then(setSites)
       .catch(() => setLoadSitesError('Impossible de charger la liste des sites.'));
+    void apiServices.projects
+      .list()
+      .then(setProjects)
+      .catch(() => setProjects([]));
+    void apiServices.storageLocations
+      .list()
+      .then(setStorageLocations)
+      .catch(() => setStorageLocations([]));
   }, []);
+
+  useEffect(() => {
+    if (formData.role !== 'chef_chantier' && formData.role !== 'magasinier') {
+      setScopeProjectIds([]);
+      setScopeStorageIds([]);
+    }
+  }, [formData.role]);
 
   const loadPending = useCallback(async () => {
     try {
@@ -351,6 +318,12 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
         site: resolveInviteSite(perimeterMode, formData.siteId),
         job_title,
         phone: phone.trim() || undefined,
+        ...(formData.role === 'chef_chantier' && scopeProjectIds.length > 0
+          ? { scoped_project_ids: scopeProjectIds }
+          : {}),
+        ...(formData.role === 'magasinier' && scopeStorageIds.length > 0
+          ? { scoped_storage_location_ids: scopeStorageIds }
+          : {}),
       });
       const delivery = describeEmailDelivery(res.email_delivery);
       if (res.invitation_email_sent === false) {
@@ -395,14 +368,10 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
   };
 
   const fullName = [firstName, lastName].filter(Boolean).join(' ').trim() || '—';
-  const roleLabel = ROLE_OPTIONS.find((r) => r.value === formData.role)?.label ?? formData.role;
-  const roleCardLabel = ROLE_CARDS.find((r) => r.value === formData.role)?.label ?? roleLabel;
+  const roleCardLabel = getRoleMeta(formData.role).label;
   const suggestedByFunction = suggestRoleFromFunction(functionLabel);
   const suggestedLabel =
-    suggestedByFunction != null
-      ? (ROLE_CARDS.find((r) => r.value === suggestedByFunction)?.label ??
-        ROLE_OPTIONS.find((r) => r.value === suggestedByFunction)?.label)
-      : null;
+    suggestedByFunction != null ? getRoleMeta(suggestedByFunction).label : null;
   const fnDisplay = functionLabel.trim() || '—';
   const functionSnippet =
     fnDisplay.length > 42 ? `${fnDisplay.slice(0, 40)}…` : fnDisplay;
@@ -695,9 +664,9 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
                       </p>
                     </div>
                     <div className="grid grid-cols-1 gap-3" role="radiogroup" aria-label="Rôle">
-                      {ROLE_CARDS.map((r) => {
+                      {ROLES.map((r) => {
                         const selected = formData.role === r.value;
-                        const Icon = r.cardIcon;
+                        const Icon = r.icon;
                         return (
                           <label
                             key={r.value}
@@ -851,6 +820,28 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
                       </div>
                     )}
 
+                    {formData.role === 'chef_chantier' || formData.role === 'magasinier' ? (
+                      <UserScopeFieldsets
+                        role={formData.role}
+                        projectOptions={projects.map((p) => ({
+                          id: p.id,
+                          name: p.name,
+                          subtitle: p.reference ? `(${p.reference})` : undefined,
+                        }))}
+                        storageOptions={storageLocations.map((s) => ({
+                          id: s.id,
+                          name: s.name,
+                          subtitle: s.storage_type,
+                        }))}
+                        projectIds={scopeProjectIds}
+                        storageIds={scopeStorageIds}
+                        onChangeProjects={setScopeProjectIds}
+                        onChangeStorages={setScopeStorageIds}
+                        disabled={loading}
+                        className="pt-4 border-t border-outline-variant"
+                      />
+                    ) : null}
+
                     <div className="space-y-4">
                       <h4 className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">
                         Droits opérationnels
@@ -988,6 +979,30 @@ export default function InviteUserDialog({ onClose, onInvited }: InviteUserDialo
                             <p className="text-xs text-on-surface-variant">{sitePerimeterSubtitle(perimeterMode)}</p>
                           </div>
                         </div>
+                        {(formData.role === 'chef_chantier' && scopeProjectIds.length > 0) ||
+                        (formData.role === 'magasinier' && scopeStorageIds.length > 0) ? (
+                          <div className="sm:col-span-2 border-t border-outline-variant pt-6">
+                            <p className="text-[10px] uppercase text-on-surface-variant font-bold mb-1">
+                              Périmètre métier (API)
+                            </p>
+                            <div className="flex flex-col gap-1 text-sm text-on-surface-variant">
+                              {formData.role === 'chef_chantier' && scopeProjectIds.length > 0 ? (
+                                <p>
+                                  <span className="font-bold text-primary">{scopeProjectIds.length}</span> chantier
+                                  {scopeProjectIds.length > 1 ? 's' : ''} assigné
+                                  {scopeProjectIds.length > 1 ? 's' : ''}
+                                </p>
+                              ) : null}
+                              {formData.role === 'magasinier' && scopeStorageIds.length > 0 ? (
+                                <p>
+                                  <span className="font-bold text-primary">{scopeStorageIds.length}</span> emplacement
+                                  {scopeStorageIds.length > 1 ? 's' : ''} assigné
+                                  {scopeStorageIds.length > 1 ? 's' : ''}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                       <div className="pt-6 border-t border-outline-variant flex items-center justify-between">
                         <div className="flex items-center gap-2 min-w-0">

@@ -44,7 +44,8 @@ const notifications = [
 ];
 
 export function TopNav({ onMenuClick }: TopNavProps) {
-  const { me, status, logout: logoutUser } = useCurrentUser();
+  const { me, status, logout: logoutUser, hasPermission } = useCurrentUser();
+  const canOpenSettings = hasPermission('settings.manage');
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
@@ -211,16 +212,19 @@ export function TopNav({ onMenuClick }: TopNavProps) {
                   <span>Mon Profil</span>
                 </button>
 
-                <button 
-                  onClick={() => {
-                    navigate('/settings');
-                    setIsProfileOpen(false);
-                  }}
-                  className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm font-medium text-on-surface hover:bg-primary/5 rounded-xl transition-colors group"
-                >
-                  <SettingsIcon className="w-4 h-4 text-slate-400 group-hover:text-primary transition-colors" />
-                  <span>Paramètres</span>
-                </button>
+                {canOpenSettings ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate('/settings');
+                      setIsProfileOpen(false);
+                    }}
+                    className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm font-medium text-on-surface hover:bg-primary/5 rounded-xl transition-colors group"
+                  >
+                    <SettingsIcon className="w-4 h-4 text-slate-400 group-hover:text-primary transition-colors" />
+                    <span>Paramètres</span>
+                  </button>
+                ) : null}
 
                 <div className="h-[1px] bg-slate-50 my-1"></div>
 
