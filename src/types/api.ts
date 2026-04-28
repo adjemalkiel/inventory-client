@@ -371,3 +371,52 @@ export type CreateInput<T> = Omit<
 >;
 
 export type PatchInput<T> = Partial<CreateInput<T>>;
+
+/** `GET /dashboard/summary/` */
+export interface DashboardSummary {
+  items_tracked: number;
+  critical_stock_count: number;
+  stockout_count: number;
+  movements_today: number;
+  movements_week: number;
+  active_projects: number;
+  total_stock_value: null;
+  total_budget: null;
+  total_cost_consumed: null;
+  unreturned_equipment: null;
+  /** Article avec le plus grand écart à la consigne minimale (narratif). */
+  most_critical_item_name: string | null;
+  /** Plus grand volume de mouvements sur les 7 derniers jours (narratif). */
+  busiest_project_last_7_days: string | null;
+}
+
+export interface DashboardStockLocationRow {
+  id: string;
+  name: string;
+  storage_type: StorageType;
+  total_items_count: number;
+  total_value: null;
+  critical_count: number;
+  fill_percent: number;
+}
+
+export interface DashboardStockDistribution {
+  locations: DashboardStockLocationRow[];
+}
+
+export interface DashboardMovementRow {
+  id: string;
+  movement_type: StockMovementType;
+  item_name: string;
+  item_sku: string;
+  quantity: string;
+  source_location_name: string | null;
+  destination_location_name: string | null;
+  project_name: string | null;
+  created_at: string;
+  created_by_name: string;
+}
+
+export interface DashboardRecentMovements {
+  movements: DashboardMovementRow[];
+}

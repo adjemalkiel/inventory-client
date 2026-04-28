@@ -5,6 +5,9 @@ import type {
   ActivityEvent,
   Agency,
   Category,
+  DashboardRecentMovements,
+  DashboardStockDistribution,
+  DashboardSummary,
   CreateInput,
   CreateUserProfileInput,
   DjangoUser,
@@ -206,6 +209,14 @@ export const apiServices = {
   rolePermissions: createCrudService<RolePermission>('role-permissions'),
   userRoles: createCrudService<UserRole>('user-roles'),
   activityEvents: createCrudService<ActivityEvent>('activity-events'),
+  dashboard: {
+    summary: (params?: { date_from?: string; date_to?: string }) =>
+      unwrap(http.get<DashboardSummary>('dashboard/summary/', { params })),
+    stockDistribution: () =>
+      unwrap(http.get<DashboardStockDistribution>('dashboard/stock-distribution/')),
+    recentMovements: (params?: { date_from?: string; date_to?: string }) =>
+      unwrap(http.get<DashboardRecentMovements>('dashboard/recent-movements/', { params })),
+  },
 };
 
 export type ApiServices = typeof apiServices;
