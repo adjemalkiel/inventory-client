@@ -212,8 +212,8 @@ export const apiServices = {
   dashboard: {
     summary: (params?: { date_from?: string; date_to?: string }) =>
       unwrap(http.get<DashboardSummary>('dashboard/summary/', { params })),
-    stockDistribution: () =>
-      unwrap(http.get<DashboardStockDistribution>('dashboard/stock-distribution/')),
+    stockDistribution: (params?: { date_from?: string; date_to?: string }) =>
+      unwrap(http.get<DashboardStockDistribution>('dashboard/stock-distribution/', { params })),
     recentMovements: (params?: { date_from?: string; date_to?: string }) =>
       unwrap(http.get<DashboardRecentMovements>('dashboard/recent-movements/', { params })),
   },

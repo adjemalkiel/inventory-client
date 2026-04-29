@@ -21,7 +21,7 @@ import { apiServices } from '@/lib/api';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import type { UserProfileRole } from '@/types/api';
 
-type PeriodPreset = 'today' | 'week' | 'month';
+type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
 
 function formatLocalISODate(d: Date): string {
   const y = d.getFullYear();
@@ -45,7 +45,9 @@ function startOfMonthLocal(d: Date): Date {
 function periodQueryParams(
   preset: PeriodPreset,
   now: Date,
-): { date_from?: string; date_to?: string } {
+  customFrom: string,
+  customTo: string,
+): { date_from: string; date_to: string } {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const to = formatLocalISODate(today);
   if (preset === 'today') {
@@ -54,7 +56,43 @@ function periodQueryParams(
   if (preset === 'week') {
     return { date_from: formatLocalISODate(startOfIsoWeekLocal(today)), date_to: to };
   }
-  return { date_from: formatLocalISODate(startOfMonthLocal(today)), date_to: to };
+  if (preset === 'month') {
+    return { date_from: formatLocalISODate(startOfMonthLocal(today)), date_to: to };
+  }
+  /* custom */
+  if (
+    customFrom &&
+    customTo &&
+    /^\d{4}-\d{2}-\d{2}$/.test(customFrom) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(customTo) &&
+    customFrom <= customTo
+  ) {
+    return { date_from: customFrom, date_to: customTo };
+  }
+  return { date_from: formatLocalISODate(startOfIsoWeekLocal(today)), date_to: to };
+}
+
+function parseLocalISODate(iso: string): Date {
+  const [y, mo, da] = iso.split('-').map((x) => parseInt(x, 10));
+  return new Date(y, mo - 1, da);
+}
+
+function formatSummaryRangeDisplay(
+  preset: PeriodPreset,
+  dateFromISO: string,
+  dateToISO: string,
+): string {
+  const df = parseLocalISODate(dateFromISO);
+  const dt = parseLocalISODate(dateToISO);
+  const fmt = new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  if (preset === 'today' || dateFromISO === dateToISO) {
+    return fmt.format(dt);
+  }
+  return `Du ${fmt.format(df)} au ${fmt.format(dt)}`;
 }
 
 function formatNum(n: number | null | undefined): string {
@@ -66,15 +104,26 @@ const PERIOD_LABELS: Record<PeriodPreset, string> = {
   today: "Aujourd'hui",
   week: 'Cette semaine',
   month: 'Ce mois',
+  custom: 'Personnalisé',
 };
 
 /** Date du jour + sélecteur de période fusionnés (menu déroulant). */
 function PeriodDateDropdown({
   periodPreset,
   onPeriodChange,
+  summaryRangeDisplay,
+  customFrom,
+  customTo,
+  onCustomFromChange,
+  onCustomToChange,
 }: {
   periodPreset: PeriodPreset;
   onPeriodChange: (p: PeriodPreset) => void;
+  summaryRangeDisplay: string;
+  customFrom: string;
+  customTo: string;
+  onCustomFromChange: (v: string) => void;
+  onCustomToChange: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -90,26 +139,22 @@ function PeriodDateDropdown({
     return () => document.removeEventListener('mousedown', handle);
   }, [open]);
 
-  const dateStr = new Intl.DateTimeFormat('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date());
-
   return (
     <div className="relative w-full sm:w-auto" ref={wrapRef}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full sm:min-w-[200px] items-center justify-between gap-3 bg-white px-4 py-2 rounded-xl shadow-sm border border-surface-container-high text-left transition-colors hover:border-primary/30"
+        className="flex w-full sm:min-w-[220px] items-center justify-between gap-3 bg-white px-4 py-2 rounded-xl shadow-sm border border-surface-container-high text-left transition-colors hover:border-primary/30"
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label={`Période : ${PERIOD_LABELS[periodPreset]}. ${dateStr}`}
+        aria-label={`Période : ${PERIOD_LABELS[periodPreset]}. ${summaryRangeDisplay}`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <Clock className="text-primary w-4 h-4 shrink-0" aria-hidden />
-          <div className="flex min-w-0 flex-col">
-            <span className="text-sm font-medium text-primary leading-tight truncate">{dateStr}</span>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-medium text-primary leading-snug line-clamp-2 sm:max-w-[min(300px,calc(100vw-140px))]">
+              {summaryRangeDisplay}
+            </span>
             <span className="text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant truncate">
               {PERIOD_LABELS[periodPreset]}
             </span>
@@ -124,28 +169,58 @@ function PeriodDateDropdown({
         />
       </button>
       {open ? (
-        <ul
-          className="absolute left-0 right-0 z-50 mt-1 rounded-xl border border-surface-container-high bg-white py-1 shadow-lg sm:left-auto sm:right-auto sm:min-w-[220px]"
-          role="listbox"
+        <div
+          className="absolute left-0 right-0 z-50 mt-1 overflow-hidden rounded-xl border border-surface-container-high bg-white shadow-lg sm:left-auto sm:right-auto sm:min-w-[280px]"
+          role="presentation"
         >
-          {(['today', 'week', 'month'] as const).map((p) => (
-            <li key={p} role="option" aria-selected={periodPreset === p}>
-              <button
-                type="button"
-                className={cn(
-                  'w-full px-4 py-2.5 text-left text-sm font-medium transition-colors',
-                  periodPreset === p ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low',
-                )}
-                onClick={() => {
-                  onPeriodChange(p);
-                  setOpen(false);
-                }}
-              >
-                {PERIOD_LABELS[p]}
-              </button>
-            </li>
-          ))}
-        </ul>
+          <ul role="listbox" className="py-1">
+            {(['today', 'week', 'month', 'custom'] as const).map((p) => (
+              <li key={p} role="option" aria-selected={periodPreset === p}>
+                <button
+                  type="button"
+                  className={cn(
+                    'w-full px-4 py-2.5 text-left text-sm font-medium transition-colors',
+                    periodPreset === p ? 'bg-primary/10 text-primary' : 'text-on-surface hover:bg-surface-container-low',
+                  )}
+                  onClick={() => {
+                    onPeriodChange(p);
+                    if (p !== 'custom') setOpen(false);
+                  }}
+                >
+                  {PERIOD_LABELS[p]}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {periodPreset === 'custom' ? (
+            <div
+              className="border-t border-surface-container-high px-3 py-2.5 space-y-2 bg-surface-container-low/40"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">Plage personnalisée</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+                <label className="flex items-center gap-2 text-xs text-on-surface min-w-0 flex-1">
+                  <span className="text-on-surface-variant shrink-0 w-6">Du</span>
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={(e) => onCustomFromChange(e.target.value)}
+                    className="w-full min-w-0 rounded-lg border border-surface-container-high px-2 py-1.5 text-sm text-primary"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs text-on-surface min-w-0 flex-1">
+                  <span className="text-on-surface-variant shrink-0 w-6">au</span>
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={(e) => onCustomToChange(e.target.value)}
+                    className="w-full min-w-0 rounded-lg border border-surface-container-high px-2 py-1.5 text-sm text-primary"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -384,6 +459,8 @@ export default function DashboardPage() {
   const role = me?.profile.role;
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('week');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
 
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof apiServices.dashboard.summary>> | null>(
     null,
@@ -402,9 +479,46 @@ export default function DashboardPage() {
 
   const [chartMode, setChartMode] = useState<'count' | 'value'>('count');
 
+  const [calendarDayStamp, setCalendarDayStamp] = useState(() => formatLocalISODate(new Date()));
+  useEffect(() => {
+    const sync = () => {
+      const d = formatLocalISODate(new Date());
+      setCalendarDayStamp((prev) => (prev !== d ? d : prev));
+    };
+    sync();
+    const id = window.setInterval(sync, 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const handlePeriodChange = useCallback((p: PeriodPreset) => {
+    setPeriodPreset(p);
+    if (p === 'custom') {
+      const now = new Date();
+      const today = formatLocalISODate(now);
+      const weekStart = formatLocalISODate(startOfIsoWeekLocal(now));
+      setCustomFrom((prev) => (prev ? prev : weekStart));
+      setCustomTo((prev) => (prev ? prev : today));
+    }
+  }, []);
+
+  /** Garde date_from ≤ date_to lors des saisies manuelles. */
+  const onCustomFromChange = useCallback((v: string) => {
+    setCustomFrom(v);
+    setCustomTo((to) => (to && v && v > to ? v : to));
+  }, []);
+  const onCustomToChange = useCallback((v: string) => {
+    setCustomTo(v);
+    setCustomFrom((from) => (from && v && v < from ? v : from));
+  }, []);
+
   const periodParams = useMemo(
-    () => periodQueryParams(periodPreset, new Date()),
-    [periodPreset],
+    () => periodQueryParams(periodPreset, new Date(), customFrom, customTo),
+    [periodPreset, customFrom, customTo, calendarDayStamp],
+  );
+
+  const summaryRangeDisplay = useMemo(
+    () => formatSummaryRangeDisplay(periodPreset, periodParams.date_from, periodParams.date_to),
+    [periodPreset, periodParams.date_from, periodParams.date_to],
   );
 
   const load = useCallback(async () => {
@@ -420,7 +534,7 @@ export default function DashboardPage() {
       p.summary(periodParams).then((d) => {
         setSummary(d);
       }),
-      p.stockDistribution().then((d) => {
+      p.stockDistribution(periodParams).then((d) => {
         setDistribution(d);
       }),
       p.recentMovements(periodParams).then((d) => {
@@ -469,7 +583,7 @@ export default function DashboardPage() {
       {
         label: periodPreset === 'today' ? 'Mouvements (jour terminant la fenêtre)' : 'Mouvements jour / période',
         value: formatNum(summary.movements_today),
-        trend: `${formatNum(summary.movements_week)} sur la fenêtre (${periodPreset === 'today' ? 'jour' : periodPreset === 'week' ? 'semaine' : 'mois'})`,
+        trend: `${formatNum(summary.movements_week)} sur la fenêtre (${periodPreset === 'today' ? 'jour' : periodPreset === 'week' ? 'semaine' : periodPreset === 'month' ? 'mois' : 'personnalisée'})`,
         icon: ArrowLeftRight,
         color: 'bg-secondary-fixed',
         trendColor: 'text-on-surface-variant',
@@ -534,7 +648,15 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-          <PeriodDateDropdown periodPreset={periodPreset} onPeriodChange={setPeriodPreset} />
+          <PeriodDateDropdown
+            periodPreset={periodPreset}
+            onPeriodChange={handlePeriodChange}
+            summaryRangeDisplay={summaryRangeDisplay}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={onCustomFromChange}
+            onCustomToChange={onCustomToChange}
+          />
           <button
             type="button"
             className="bg-primary text-white px-6 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary-container transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg shadow-primary/10 active:scale-[0.98] opacity-70"
