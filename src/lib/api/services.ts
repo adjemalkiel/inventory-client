@@ -1,6 +1,7 @@
 import type { AxiosResponse } from 'axios';
 
 import http from './http';
+import { getAccessToken } from '@/lib/auth';
 import type {
   ActivityEvent,
   Agency,
@@ -16,6 +17,7 @@ import type {
   InviteUserResponse,
   Integration,
   Item,
+  ItemDetailResponse,
   ItemProjectAssignment,
   MeResponse,
   MeUpdatePayload,
@@ -30,6 +32,7 @@ import type {
   StockBalance,
   StockMovement,
   StorageLocation,
+  Supplier,
   UnitOfMeasure,
   UserProfile,
   UserRole,
@@ -37,9 +40,33 @@ import type {
 import {
   normalizeListResponse,
   type ListResponse,
+  type PaginatedResponse,
   type UUID,
   type UserId,
 } from '@/types/common';
+
+export type InventoryListParams = {
+  page?: number;
+  page_size?: number;
+  category?: string;
+  supplier?: string;
+  stock_status?: 'available' | 'low' | 'stockout' | 'critical';
+  search?: string;
+  ordering?: string;
+  is_active?: boolean;
+  storage_location?: string;
+};
+
+type QueryParams = Record<string, string | number | boolean | undefined | null>;
+
+function compactParams(params?: QueryParams): QueryParams | undefined {
+  if (!params) return undefined;
+  const entries = Object.entries(params).filter(
+    ([, v]) => v !== undefined && v !== null && v !== '',
+  );
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries) as QueryParams;
+}
 
 /** Optional body: test current form values without saving (merges with stored password if password empty). */
 export type SmtpTestPayload = {
@@ -83,8 +110,8 @@ export const organizationSettingsApi = {
 export type ResourceId = UUID | UserId;
 
 type CrudService<T, TCreate = CreateInput<T>, TPatch = PatchInput<T>> = {
-  list: () => Promise<T[]>;
-  rawList: () => Promise<ListResponse<T>>;
+  list: (params?: QueryParams) => Promise<T[]>;
+  rawList: (params?: QueryParams) => Promise<ListResponse<T>>;
   get: (id: ResourceId) => Promise<T>;
   create: (payload: TCreate) => Promise<T>;
   update: (id: ResourceId, payload: TCreate) => Promise<T>;
@@ -113,8 +140,12 @@ function createCrudService<T, TCreate = CreateInput<T>, TPatch = PatchInput<T>>(
 ): CrudService<T, TCreate, TPatch> {
   const base = `${endpoint.replace(/^\/|\/$/g, '')}/`;
   return {
-    list: async () => normalizeListResponse(await unwrap(http.get<ListResponse<T>>(base))),
-    rawList: () => unwrap(http.get<ListResponse<T>>(base)),
+    list: async (params?: QueryParams) =>
+      normalizeListResponse(
+        await unwrap(http.get<ListResponse<T>>(base, { params: compactParams(params) })),
+      ),
+    rawList: (params?: QueryParams) =>
+      unwrap(http.get<ListResponse<T>>(base, { params: compactParams(params) })),
     get: (id: ResourceId) => unwrap(http.get<T>(`${base}${id}/`)),
     create: (payload) => unwrap(http.post<T>(base, payload)),
     update: (id, payload) => unwrap(http.put<T>(`${base}${id}/`, payload)),
@@ -167,6 +198,7 @@ export const meApi = {
 };
 
 const usersBase = createCrudService<DjangoUser>('users');
+const itemsBase = createCrudService<Item>('items');
 
 export const apiServices = {
   users: {
@@ -196,7 +228,33 @@ export const apiServices = {
   unitsOfMeasure: createCrudService<UnitOfMeasure>('units-of-measure'),
   categories: createCrudService<Category>('categories'),
   userProfiles: createCrudService<UserProfile, CreateUserProfileInput, Partial<CreateUserProfileInput>>('user-profiles'),
-  items: createCrudService<Item>('items'),
+  items: {
+    ...itemsBase,
+    detailBundle: (id: UUID) => unwrap(http.get<ItemDetailResponse>(`items/${id}/detail/`)),
+    uploadImage: async (id: UUID, file: File) => {
+      const fd = new FormData();
+      fd.append('image', file);
+      const root = (http.defaults.baseURL ?? '/api/v1/').replace(/\/?$/, '/');
+      const url = `${root}items/${id}/upload-image/`;
+      const token = getAccessToken();
+      const res = await fetch(url, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = (await res.json().catch(() => ({}))) as { image_url?: string; detail?: string };
+      if (!res.ok) {
+        throw new Error((data.detail as string) || `Upload échoué (${res.status})`);
+      }
+      return data as { image_url: string };
+    },
+  },
+  inventory: {
+    list: (params?: InventoryListParams) =>
+      unwrap(http.get<PaginatedResponse<Item>>('items/', { params: compactParams(params) })),
+  },
+  suppliers: createCrudService<Supplier>('suppliers'),
   stockBalances: createCrudService<StockBalance>('stock-balances'),
   projects: createCrudService<Project>('projects'),
   projectResources: createCrudService<ProjectResource>('project-resources'),

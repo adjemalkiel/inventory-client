@@ -93,6 +93,54 @@ function detailFromAxiosError(error: AxiosError): string | undefined {
   return undefined;
 }
 
+function pushValidationStrings(val: unknown, out: string[]): void {
+  if (typeof val === 'string') {
+    const s = val.trim();
+    if (s) out.push(s);
+    return;
+  }
+  if (!Array.isArray(val)) return;
+  for (const x of val) {
+    if (typeof x === 'string') {
+      const s = x.trim();
+      if (s) out.push(s);
+    }
+  }
+}
+
+/**
+ * Agrège les messages d’erreur DRF (`detail`, erreurs par champ, etc.)
+ * pour affichage dans les formulaires.
+ */
+export function extractDrfErrorMessage(error: unknown): string | null {
+  if (!axios.isAxiosError(error) || error.response?.data == null) {
+    return null;
+  }
+  const data = error.response.data;
+  if (typeof data === 'string') {
+    const s = data.trim();
+    return s || null;
+  }
+  if (typeof data !== 'object' || data === null) {
+    return null;
+  }
+
+  const record = data as Record<string, unknown>;
+  const parts: string[] = [];
+
+  pushValidationStrings(record.detail, parts);
+
+  for (const [key, val] of Object.entries(record)) {
+    if (key === 'detail') continue;
+    pushValidationStrings(val, parts);
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+  return [...new Set(parts)].join(' ');
+}
+
 http.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {

@@ -20,6 +20,7 @@ import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import NewMovementPage from './pages/NewMovementPage';
 import NewItemPage from './pages/NewItemPage';
+import EditItemPage from './pages/EditItemPage';
 import ItemDetailPage from './pages/ItemDetailPage';
 import { CurrentUserProvider } from './context/CurrentUserContext';
 import { ForbiddenBanner } from './components/ForbiddenBanner';
@@ -58,8 +59,9 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/inventory/new" element={<NewItemPage />} />
-            <Route path="/inventory/:id" element={<ItemDetailPage />} />
             <Route path="/inventory/new-movement" element={<NewMovementPage />} />
+            <Route path="/inventory/:id/edit" element={<EditItemPage />} />
+            <Route path="/inventory/:id" element={<ItemDetailPage />} />
             <Route path="/movements" element={<MovementsPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/:id" element={<ProjectDetailPage />} />
