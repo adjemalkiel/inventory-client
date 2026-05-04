@@ -232,6 +232,19 @@ export type InviteUserResponse = {
   email_delivery?: EmailDeliveryKind;
 };
 
+export type ItemCondition = 'neuf' | 'bon' | 'use' | 'hors_service' | '';
+
+export interface Supplier extends ApiAudit {
+  name: string;
+  contact_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  notes: string;
+  is_active: boolean;
+}
+
 export interface Item extends ApiAudit {
   name: string;
   sku: string;
@@ -240,12 +253,29 @@ export interface Item extends ApiAudit {
   subcategory_label: string;
   brand: string;
   image_url: string;
+  /** URL fichier si présent (upload local). */
+  image?: string | null;
   purchase_date: ISODate | null;
   warranty_label: string;
   supplier_name: string;
+  supplier: UUID | null;
   unit: UUID;
   min_stock: string;
   is_active: boolean;
+  unit_price: string | null;
+  currency: string;
+  serial_number: string;
+  barcode: string;
+  condition: ItemCondition;
+  is_consumable: boolean;
+  is_rented: boolean;
+  rental_daily_cost: string | null;
+  total_stock?: string;
+  stock_status?: 'available' | 'low' | 'stockout';
+  stock_value?: string | null;
+  category_name?: string;
+  unit_name?: string;
+  supplier_display?: string | null;
 }
 
 export interface StockBalance extends ApiAudit {
@@ -253,6 +283,7 @@ export interface StockBalance extends ApiAudit {
   storage_location: UUID;
   zone_label: string;
   quantity: string;
+  storage_location_name?: string;
 }
 
 export interface Project extends ApiAudit {
@@ -293,11 +324,17 @@ export interface ProjectResource extends ApiAudit {
 export interface StockMovement extends ApiAudit {
   movement_type: StockMovementType;
   item: UUID;
+  item_name?: string;
+  item_sku?: string;
   quantity: string;
   source_storage_location: UUID | null;
   destination_storage_location: UUID | null;
   project: UUID | null;
   comment: string;
+  source_storage_location_name?: string | null;
+  destination_storage_location_name?: string | null;
+  project_name?: string | null;
+  created_by_name?: string | null;
 }
 
 export interface ItemProjectAssignment extends ApiAudit {
@@ -305,6 +342,16 @@ export interface ItemProjectAssignment extends ApiAudit {
   project: UUID;
   assigned_at: ISODate | null;
   notes: string;
+  project_name?: string;
+  project_reference?: string;
+}
+
+/** `GET /items/{id}/detail/` */
+export interface ItemDetailResponse {
+  item: Item;
+  balances: StockBalance[];
+  movements: StockMovement[];
+  assignments: ItemProjectAssignment[];
 }
 
 export interface OrganizationSettings extends ApiAudit {
