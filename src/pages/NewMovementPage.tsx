@@ -1,37 +1,57 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { 
-  X, 
-  ChevronDown, 
-  Search, 
-  Warehouse, 
-  MapPin, 
-  Construction, 
-  Bot, 
-  Sparkles, 
-  Lightbulb, 
-  ArrowRight, 
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  X,
+  ChevronDown,
+  Search,
+  Warehouse,
+  MapPin,
+  Construction,
+  Bot,
+  Lightbulb,
+  ArrowRight,
   QrCode,
   Save,
-  PlusCircle
+  Package,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
-import { apiServices } from '@/lib/api';
+import { apiServices, extractDrfErrorMessage } from '@/lib/api';
 import type {
   CreateInput,
   Item,
   Project,
+  StockBalance,
   StockMovement,
   StockMovementType,
   StorageLocation,
 } from '@/types/api';
 
+function qtyAtMovementZone(balances: StockBalance[], locationId: string): number {
+  return balances
+    .filter(
+      (b) =>
+        b.storage_location === locationId && (b.zone_label ?? '').trim() === '',
+    )
+    .reduce((sum, b) => sum + Number.parseFloat(b.quantity || '0'), 0);
+}
+
+function fmtQty(n: number): string {
+  return new Intl.NumberFormat('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  }).format(n);
+}
+
 export default function NewMovementPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const presetItemId = searchParams.get('itemId');
   const [items, setItems] = useState<Item[]>([]);
   const [locations, setLocations] = useState<StorageLocation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [itemBalances, setItemBalances] = useState<StockBalance[]>([]);
+  const [balancesLoading, setBalancesLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -47,18 +67,22 @@ export default function NewMovementPage() {
   useEffect(() => {
     let isMounted = true;
     Promise.all([
-      apiServices.items.list(),
-      apiServices.storageLocations.list(),
-      apiServices.projects.list(),
+      apiServices.items.list({ page_size: 500 }),
+      apiServices.storageLocations.list({ page_size: 500 }),
+      apiServices.projects.list({ page_size: 500 }),
     ])
       .then(([itemsData, locationsData, projectsData]) => {
         if (!isMounted) return;
         setItems(itemsData);
         setLocations(locationsData);
         setProjects(projectsData);
+        const itemInitial =
+          presetItemId && itemsData.some((i) => i.id === presetItemId)
+            ? presetItemId
+            : itemsData[0]?.id ?? '';
         setFormData((prev) => ({
           ...prev,
-          itemId: itemsData[0]?.id ?? '',
+          itemId: itemInitial,
           sourceLocationId: locationsData[0]?.id ?? '',
           destinationLocationId: locationsData[1]?.id ?? locationsData[0]?.id ?? '',
           projectId: projectsData[0]?.id ?? '',
@@ -70,7 +94,32 @@ export default function NewMovementPage() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [presetItemId]);
+
+  useEffect(() => {
+    if (!formData.itemId) {
+      setItemBalances([]);
+      return;
+    }
+    let isMounted = true;
+    setBalancesLoading(true);
+    apiServices.stockBalances
+      .list({ item: formData.itemId, page_size: 500 })
+      .then((rows) => {
+        if (!isMounted) return;
+        setItemBalances(rows);
+      })
+      .catch((error) => {
+        console.error('Failed to load stock balances for item:', error);
+        if (isMounted) setItemBalances([]);
+      })
+      .finally(() => {
+        if (isMounted) setBalancesLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [formData.itemId]);
 
   const movementRequiresSource = useMemo(
     () => formData.movementType !== 'entree',
@@ -80,6 +129,54 @@ export default function NewMovementPage() {
     () => formData.movementType !== 'sortie',
     [formData.movementType],
   );
+
+  const selectedItem = useMemo(
+    () => items.find((i) => i.id === formData.itemId),
+    [items, formData.itemId],
+  );
+
+  const quantityDelta = useMemo(() => {
+    const raw = formData.quantity.trim().replace(',', '.');
+    const n = Number.parseFloat(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }, [formData.quantity]);
+
+  const locationById = useMemo(
+    () => new Map(locations.map((l) => [l.id, l.name])),
+    [locations],
+  );
+
+  const sourceStock = useMemo(
+    () =>
+      movementRequiresSource && formData.sourceLocationId
+        ? qtyAtMovementZone(itemBalances, formData.sourceLocationId)
+        : null,
+    [movementRequiresSource, formData.sourceLocationId, itemBalances],
+  );
+
+  const destinationStock = useMemo(
+    () =>
+      movementRequiresDestination && formData.destinationLocationId
+        ? qtyAtMovementZone(itemBalances, formData.destinationLocationId)
+        : null,
+    [movementRequiresDestination, formData.destinationLocationId, itemBalances],
+  );
+
+  const projectedSource =
+    sourceStock !== null && quantityDelta > 0 ? sourceStock - quantityDelta : null;
+  const projectedDestination =
+    destinationStock !== null && quantityDelta > 0
+      ? destinationStock + quantityDelta
+      : null;
+
+  const unitLabel = selectedItem?.unit_name?.trim() || 'unités';
+
+  const movementTypeLabel: Record<StockMovementType, string> = {
+    entree: 'Entrée',
+    sortie: 'Sortie',
+    transfert: 'Transfert',
+    retour: 'Retour',
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -108,7 +205,8 @@ export default function NewMovementPage() {
       await apiServices.stockMovements.create(payload);
     } catch (error) {
       console.error('Failed to save movement:', error);
-      setSubmitError("Impossible d'enregistrer ce mouvement.");
+      const apiMsg = extractDrfErrorMessage(error);
+      setSubmitError(apiMsg ?? "Impossible d'enregistrer ce mouvement.");
       setIsSubmitting(false);
       return;
     }
@@ -350,49 +448,123 @@ export default function NewMovementPage() {
           <div className="lg:col-span-4">
             <div className="sticky top-32 space-y-8">
               <div className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/50 border border-slate-100">
-                <h3 className="font-headline font-bold text-2xl text-primary mb-8 tracking-tight">Récapitulatif</h3>
+                <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
+                  <h3 className="font-headline font-bold text-2xl text-primary tracking-tight">
+                    Récapitulatif
+                  </h3>
+                  <span className="rounded-full bg-primary/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-primary">
+                    {movementTypeLabel[formData.movementType]}
+                  </span>
+                </div>
                 <div className="space-y-8">
                   <div className="flex gap-5">
-                    <div className="w-16 h-16 rounded-2xl bg-slate-50 overflow-hidden shrink-0 border border-slate-100 p-2">
-                      <img 
-                        alt="Poutres en acier" 
-                        className="w-full h-full object-contain" 
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCcODcJ62bhlfeFhXjquVPJEoHp9XnVK6HujPhZFPSp1nQu_m03Gvc4EnNc193m15YrTl1UIlgp24jkW_ijCuEqo-cwT8Mzw6xaWsejx_dbmx7i9WQAxY-n6dnjBZvkwUF3h1BB_RhYbloEiUKKPp9PH54qEG-3ICDkZDPISp45J7imucIYkcjbaR9Xkd5bT0ZcofOpcALSss4OiyiKL1XbLsi115p6LM9DOKyndlPh0Q_RoHJFqm8-XHXrZd6gxute0qOChw1mL5fh"
-                        referrerPolicy="no-referrer"
-                      />
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 p-2">
+                      {selectedItem?.image_url?.trim() ? (
+                        <img
+                          alt={selectedItem.name}
+                          className="h-full w-full object-contain"
+                          src={selectedItem.image_url}
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <Package className="h-8 w-8 text-slate-300" aria-hidden />
+                      )}
                     </div>
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Dernier Article Sélectionné</p>
-                      <p className="font-bold text-primary text-lg leading-tight">IPN 200 - Acier Galvanisé</p>
-                      <p className="text-xs text-slate-500 font-medium mt-1">Réf: STL-IPN200-88</p>
+                    <div className="min-w-0">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        Article sélectionné
+                      </p>
+                      {selectedItem ? (
+                        <>
+                          <p className="text-lg font-bold leading-tight text-primary">{selectedItem.name}</p>
+                          <p className="mt-1 text-xs font-medium text-slate-500">
+                            Réf. {selectedItem.sku || '—'}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-slate-500">
+                          {items.length === 0 ? 'Aucun article dans le catalogue.' : '—'}
+                        </p>
+                      )}
                     </div>
                   </div>
 
-                  <div className="pt-8 border-t border-slate-50 space-y-6">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-slate-500">Stock Actuel (Source)</span>
-                      <span className="font-bold text-primary">124 unités</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-slate-500">Stock Prévu (Destination)</span>
-                      <span className="font-bold text-primary italic flex items-center gap-1">
-                        <PlusCircle className="w-4 h-4 text-primary" />
-                        Nouveau
-                      </span>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: '65%' }}
-                          className="h-full bg-primary"
-                        />
+                  <div className="space-y-6 border-t border-slate-50 pt-8">
+                    {balancesLoading ? (
+                      <p className="text-center text-xs font-medium text-slate-400">Chargement des stocks…</p>
+                    ) : null}
+
+                    {movementRequiresSource && formData.sourceLocationId ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Lieu source
+                        </p>
+                        <p className="text-sm font-semibold text-primary">
+                          {locationById.get(formData.sourceLocationId) ?? '—'}
+                        </p>
+                        <div className="flex justify-between gap-3 text-sm">
+                          <span className="text-slate-500">Stock actuel</span>
+                          <span className="font-bold text-primary">
+                            {fmtQty(sourceStock ?? 0)} {unitLabel}
+                          </span>
+                        </div>
+                        {quantityDelta > 0 ? (
+                          <div className="flex justify-between gap-3 text-sm">
+                            <span className="text-slate-500">Après mouvement</span>
+                            <span
+                              className={cn(
+                                'font-bold',
+                                projectedSource !== null && projectedSource < 0
+                                  ? 'text-error'
+                                  : 'text-primary',
+                              )}
+                            >
+                              {fmtQty(projectedSource ?? sourceStock ?? 0)} {unitLabel}
+                            </span>
+                          </div>
+                        ) : null}
+                        {projectedSource !== null && projectedSource < 0 ? (
+                          <p className="text-[11px] font-medium text-error">
+                            Quantité insuffisante sur cette ligne de stock (zone par défaut).
+                          </p>
+                        ) : null}
                       </div>
-                      <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-widest">
-                        Capacité de stockage à 65% sur le lieu destination
+                    ) : null}
+
+                    {movementRequiresDestination && formData.destinationLocationId ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Lieu destination
+                        </p>
+                        <p className="text-sm font-semibold text-primary">
+                          {locationById.get(formData.destinationLocationId) ?? '—'}
+                        </p>
+                        <div className="flex justify-between gap-3 text-sm">
+                          <span className="text-slate-500">Stock actuel</span>
+                          <span className="font-bold text-primary">
+                            {fmtQty(destinationStock ?? 0)} {unitLabel}
+                          </span>
+                        </div>
+                        {quantityDelta > 0 ? (
+                          <div className="flex justify-between gap-3 text-sm">
+                            <span className="text-slate-500">Après mouvement</span>
+                            <span className="font-bold text-primary">
+                              {fmtQty(projectedDestination ?? destinationStock ?? 0)} {unitLabel}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {!balancesLoading &&
+                    selectedItem &&
+                    (movementRequiresSource || movementRequiresDestination) &&
+                    quantityDelta <= 0 ? (
+                      <p className="text-[11px] text-slate-400">
+                        Indiquez une quantité pour voir l&apos;impact sur les stocks (zones sans étiquette
+                        uniquement, comme lors de l&apos;enregistrement du mouvement).
                       </p>
-                    </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
