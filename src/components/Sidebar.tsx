@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import { userDisplayName, userInitials } from '@/lib/userDisplay';
+import { apiServices } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { isPaginatedResponse } from '@/types/common';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Tableau de bord', path: '/dashboard' },
@@ -47,6 +49,27 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { me, status, hasPermission } = useCurrentUser();
+  const [pendingMoves, setPendingMoves] = useState<number | null>(null);
+
+  const canSeePendingBadge = hasPermission('movement.validate');
+
+  useEffect(() => {
+    if (!canSeePendingBadge) {
+      setPendingMoves(null);
+      return;
+    }
+    const poll = () => {
+      apiServices.stockMovements
+        .rawList({ status: 'pending', page_size: 1 })
+        .then((r) =>
+          setPendingMoves(isPaginatedResponse(r) ? r.count : r.length ?? 0),
+        )
+        .catch(() => setPendingMoves(null));
+    };
+    poll();
+    const id = window.setInterval(poll, 60_000);
+    return () => window.clearInterval(id);
+  }, [canSeePendingBadge]);
 
   const systemItemsVisible = useMemo(
     () =>
@@ -103,17 +126,28 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               to={item.path}
               onClick={() => onClose()}
               className={({ isActive }) => {
-                const isProjectDetail = item.path === '/projects' && (window.location.pathname.startsWith('/projects/') || window.location.pathname === '/projects/new');
+                const isProjectDetail =
+                  item.path === '/projects' &&
+                  (window.location.pathname.startsWith('/projects/') ||
+                    window.location.pathname === '/projects/new');
                 return cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 font-headline text-sm group",
-                  (isActive || isProjectDetail)
-                    ? "bg-white/10 text-white border-r-4 border-primary-container font-semibold" 
-                    : "text-slate-400 hover:text-white hover:bg-white/5"
+                  'flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 font-headline text-sm group',
+                  isActive || isProjectDetail
+                    ? 'bg-white/10 text-white border-r-4 border-primary-container font-semibold'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5',
                 );
               }}
             >
-              <item.icon className="w-5 h-5" />
-              <span>{item.label}</span>
+              <item.icon className="w-5 h-5 shrink-0" />
+              <span className="flex-1 truncate">{item.label}</span>
+              {item.path === '/movements' &&
+              canSeePendingBadge &&
+              pendingMoves != null &&
+              pendingMoves > 0 ? (
+                <span className="min-w-[1.25rem] rounded-full bg-red-500 px-1.5 text-center text-[10px] font-bold leading-5 text-white">
+                  {pendingMoves > 99 ? '99+' : pendingMoves}
+                </span>
+              ) : null}
             </NavLink>
           ))}
 

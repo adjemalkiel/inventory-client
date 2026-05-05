@@ -7,6 +7,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
 import MovementsPage from './pages/MovementsPage';
+import MovementDetailPage from './pages/MovementDetailPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import NewProjectPage from './pages/NewProjectPage';
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/inventory/:id/edit" element={<EditItemPage />} />
             <Route path="/inventory/:id" element={<ItemDetailPage />} />
             <Route path="/movements" element={<MovementsPage />} />
+            <Route path="/movements/:id" element={<MovementDetailPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/:id" element={<ProjectDetailPage />} />
             <Route path="/projects/new" element={<NewProjectPage />} />

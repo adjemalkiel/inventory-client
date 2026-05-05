@@ -31,7 +31,26 @@ export type ProjectPriority = 'haute' | 'moyenne' | 'basse';
 export type ProjectCriticality = 'standard' | 'sensible' | 'critique';
 export type ProjectTrackingMode = 'progress' | 'hours';
 export type ProjectResourceKind = 'equipment' | 'subcontract';
-export type StockMovementType = 'entree' | 'sortie' | 'transfert' | 'retour';
+export type StockMovementType =
+  | 'entree'
+  | 'sortie'
+  | 'transfert'
+  | 'retour'
+  | 'ajustement';
+
+export type StockMovementStatus =
+  | 'draft'
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'completed';
+
+export type StockMovementLossReason =
+  | 'perte'
+  | 'casse'
+  | 'vol'
+  | 'peremption'
+  | 'autre';
 
 export interface Site extends ApiAudit {
   name: string;
@@ -331,10 +350,43 @@ export interface StockMovement extends ApiAudit {
   destination_storage_location: UUID | null;
   project: UUID | null;
   comment: string;
+  status: StockMovementStatus;
+  unit_price_at_movement: string | null;
+  total_cost: string | null;
+  reference_number: string;
+  approved_by: UserId | null;
+  approved_at: ISODateTime | null;
+  rejection_reason: string;
+  attachment: string | null;
+  loss_reason: StockMovementLossReason | '';
   source_storage_location_name?: string | null;
   destination_storage_location_name?: string | null;
   project_name?: string | null;
   created_by_name?: string | null;
+  approved_by_name?: string | null;
+}
+
+/** POST body for création mouvement (hors métadonnées audit). */
+export type StockMovementCreatePayload = {
+  movement_type: StockMovementType;
+  item: UUID;
+  quantity: string;
+  source_storage_location: UUID | null;
+  destination_storage_location: UUID | null;
+  project: UUID | null;
+  comment?: string;
+  unit_price_at_movement?: string | null;
+  loss_reason?: StockMovementLossReason | '';
+};
+
+export interface ApprovalRule extends ApiAudit {
+  movement_type: StockMovementType;
+  min_value_threshold: string;
+  approver_role: UUID;
+  project: UUID | null;
+  is_active: boolean;
+  approver_role_name?: string;
+  approver_role_code?: string;
 }
 
 export interface ItemProjectAssignment extends ApiAudit {

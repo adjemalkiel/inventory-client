@@ -5,6 +5,7 @@ import { getAccessToken } from '@/lib/auth';
 import type {
   ActivityEvent,
   Agency,
+  ApprovalRule,
   Category,
   DashboardRecentMovements,
   DashboardStockDistribution,
@@ -31,6 +32,7 @@ import type {
   Site,
   StockBalance,
   StockMovement,
+  StockMovementCreatePayload,
   StorageLocation,
   Supplier,
   UnitOfMeasure,
@@ -200,6 +202,13 @@ export const meApi = {
 const usersBase = createCrudService<DjangoUser>('users');
 const itemsBase = createCrudService<Item>('items');
 
+const stockMovementsEndpoint = 'stock-movements';
+
+const stockMovementsBase =
+  createCrudService<StockMovement, StockMovementCreatePayload>(
+    stockMovementsEndpoint,
+  );
+
 export const apiServices = {
   users: {
     ...usersBase,
@@ -258,7 +267,36 @@ export const apiServices = {
   stockBalances: createCrudService<StockBalance>('stock-balances'),
   projects: createCrudService<Project>('projects'),
   projectResources: createCrudService<ProjectResource>('project-resources'),
-  stockMovements: createCrudService<StockMovement>('stock-movements'),
+  stockMovements: {
+    ...stockMovementsBase,
+    approve: (id: ResourceId) =>
+      unwrap(http.post<StockMovement>(`${stockMovementsEndpoint}/${id}/approve/`, {})),
+    reject: (id: ResourceId, rejection_reason: string) =>
+      unwrap(
+        http.post<StockMovement>(`${stockMovementsEndpoint}/${id}/reject/`, {
+          rejection_reason,
+        }),
+      ),
+    createWithOptionalAttachment: async (
+      payload: StockMovementCreatePayload,
+      file?: File | null,
+    ) => {
+      if (!file) {
+        return stockMovementsBase.create(payload);
+      }
+      const fd = new FormData();
+      (Object.entries(payload) as [
+        keyof StockMovementCreatePayload,
+        string | null | undefined,
+      ][]).forEach(([key, val]) => {
+        if (val === undefined || val === null || val === '') return;
+        fd.append(key as string, String(val));
+      });
+      fd.append('attachment', file);
+      return unwrap(http.post<StockMovement>(`${stockMovementsEndpoint}/`, fd));
+    },
+  },
+  approvalRules: createCrudService<ApprovalRule>('approval-rules'),
   itemProjectAssignments: createCrudService<ItemProjectAssignment>('item-project-assignments'),
   organizationSettings: createCrudService<OrganizationSettings>('organization-settings'),
   integrations: createCrudService<Integration>('integrations'),

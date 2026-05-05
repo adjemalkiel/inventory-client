@@ -41,6 +41,7 @@ const MOV_LABEL: Record<StockMovementType, string> = {
   sortie: 'Sortie',
   transfert: 'Transfert',
   retour: 'Retour',
+  ajustement: 'Ajustement',
 };
 
 function movementBadgeClass(t: StockMovementType): string {
@@ -51,6 +52,8 @@ function movementBadgeClass(t: StockMovementType): string {
       return 'bg-error-container text-on-error-container';
     case 'transfert':
       return 'bg-secondary-container text-on-secondary-container';
+    case 'ajustement':
+      return 'bg-violet-100 text-violet-800';
     case 'retour':
     default:
       return 'bg-primary-container text-on-primary-container';
