@@ -27,10 +27,30 @@ export type ProjectType =
   | 'residentiel_collectif'
   | 'tertiaire'
   | 'infrastructure_publique';
+export type ProjectStatus =
+  | 'brouillon'
+  | 'planification'
+  | 'en_cours'
+  | 'suspendu'
+  | 'termine'
+  | 'annule';
 export type ProjectPriority = 'haute' | 'moyenne' | 'basse';
 export type ProjectCriticality = 'standard' | 'sensible' | 'critique';
 export type ProjectTrackingMode = 'progress' | 'hours';
 export type ProjectResourceKind = 'equipment' | 'subcontract';
+export type ProjectPhaseStatus =
+  | 'a_venir'
+  | 'en_cours'
+  | 'termine'
+  | 'en_retard';
+export type ProjectBudgetCategory =
+  | 'materiaux'
+  | 'main_oeuvre'
+  | 'sous_traitance'
+  | 'location'
+  | 'frais_generaux'
+  | 'logistique'
+  | 'autre';
 export type StockMovementType =
   | 'entree'
   | 'sortie'
@@ -310,7 +330,7 @@ export interface Project extends ApiAudit {
   reference: string;
   project_type: ProjectType;
   client_name: string;
-  status: string;
+  status: ProjectStatus;
   priority: ProjectPriority;
   description: string;
   address: string;
@@ -329,6 +349,65 @@ export interface Project extends ApiAudit {
   rfid_sync_enabled: boolean;
   ai_assistance_enabled: boolean;
   is_draft: boolean;
+  progress_percent: number;
+  surface_m2: string | null;
+  contract_value: string | null;
+  currency: string;
+  notes: string;
+  phases_count?: number;
+  budget_lines_count?: number;
+  movements_count?: number;
+  manager_name?: string | null;
+  works_supervisor_name?: string | null;
+  agency_name?: string | null;
+}
+
+export interface ProjectPhase extends ApiAudit {
+  project: UUID;
+  name: string;
+  order: number;
+  status: ProjectPhaseStatus;
+  start_date: ISODate | null;
+  end_date: ISODate | null;
+  progress_percent: number;
+  budget_amount: string | null;
+  description: string;
+  project_name?: string | null;
+  project_reference?: string | null;
+}
+
+export interface ProjectBudgetLine extends ApiAudit {
+  project: UUID;
+  phase: UUID | null;
+  category: ProjectBudgetCategory;
+  label: string;
+  budget_amount: string;
+  actual_amount: string | null;
+  notes: string;
+  project_name?: string | null;
+  phase_name?: string | null;
+  category_label?: string;
+}
+
+export interface ProjectSummary {
+  project_id: UUID;
+  status: ProjectStatus;
+  progress_percent: number;
+  budget_amount: string | null;
+  contract_value: string | null;
+  currency: string;
+  budget_lines_total: string;
+  cost_materials_consumed: string;
+  budget_consumed_percent: number | null;
+  total_movements: number;
+  items_assigned: number;
+  storage_locations_count: number;
+  phases_count: number;
+  cost_labour: string | null;
+  cost_subcontracting: string | null;
+  cost_rental: string | null;
+  cost_total: string | null;
+  margin_percent: number | null;
 }
 
 export interface ProjectResource extends ApiAudit {

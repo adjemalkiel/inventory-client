@@ -26,7 +26,10 @@ import type {
   PatchInput,
   Permission,
   Project,
+  ProjectBudgetLine,
+  ProjectPhase,
   ProjectResource,
+  ProjectSummary,
   Role,
   RolePermission,
   Site,
@@ -265,7 +268,13 @@ export const apiServices = {
   },
   suppliers: createCrudService<Supplier>('suppliers'),
   stockBalances: createCrudService<StockBalance>('stock-balances'),
-  projects: createCrudService<Project>('projects'),
+  projects: {
+    ...createCrudService<Project>('projects'),
+    summary: (id: UUID) =>
+      unwrap(http.get<ProjectSummary>(`projects/${id}/summary/`)),
+  },
+  projectPhases: createCrudService<ProjectPhase>('project-phases'),
+  projectBudgetLines: createCrudService<ProjectBudgetLine>('project-budget-lines'),
   projectResources: createCrudService<ProjectResource>('project-resources'),
   stockMovements: {
     ...stockMovementsBase,

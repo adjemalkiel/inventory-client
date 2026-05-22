@@ -264,6 +264,7 @@ export default function MovementsPage() {
     if (dateTo.trim()) params.date_to = dateTo.trim();
     if (userFilter.trim()) params.created_by = Number.parseInt(userFilter.trim(), 10);
     if (statusFilter.trim()) params.status = statusFilter.trim();
+    if (typeFilter !== 'all') params.movement_type = typeFilter;
     const q = searchQuery.trim();
     if (q) params.search = q;
 

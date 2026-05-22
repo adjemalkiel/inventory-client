@@ -1,652 +1,906 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Rocket, 
-  Info, 
-  AlertTriangle, 
-  Plus, 
-  Trash2, 
-  TrendingUp, 
-  Clock, 
-  ArrowRight, 
-  Bot, 
-  ClipboardCheck, 
-  Package,
-  Truck,
-  HardHat,
+import {
+  Rocket,
+  Info,
+  AlertTriangle,
+  TrendingUp,
+  Clock,
+  ArrowRight,
   ChevronDown,
-  Calendar
+  Calendar,
+  Check,
+  ChevronLeft,
+  ChevronRight as ChevronRightIcon,
+  ClipboardCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiServices } from '@/lib/api';
 import type {
   Agency,
   CreateInput,
+  DjangoUser,
   Project,
   ProjectCriticality,
   ProjectPriority,
+  ProjectStatus,
   ProjectTrackingMode,
   ProjectType,
 } from '@/types/api';
+import { isPaginatedResponse } from '@/types/common';
+import { useCurrentUser } from '@/context/CurrentUserContext';
+
+type FormData = {
+  name: string;
+  reference: string;
+  project_type: ProjectType;
+  client_name: string;
+  description: string;
+  address: string;
+  city: string;
+  agency: string;
+  manager: string;
+  works_supervisor: string;
+  start_date: string;
+  end_date: string;
+  priority: ProjectPriority;
+  criticality: ProjectCriticality;
+  budget_amount: string;
+  contract_value: string;
+  currency: string;
+  surface_m2: string;
+  tracking_mode: ProjectTrackingMode;
+  auto_alerts_enabled: boolean;
+  movement_slips_enabled: boolean;
+  ai_assistance_enabled: boolean;
+  rfid_sync_enabled: boolean;
+  saveAs: 'planification' | 'brouillon';
+};
+
+const STEPS = [
+  { id: 1, label: 'Informations générales' },
+  { id: 2, label: 'Équipe & Planning' },
+  { id: 3, label: 'Budget' },
+  { id: 4, label: 'Options' },
+] as const;
 
 export default function NewProjectPage() {
   const navigate = useNavigate();
+  const { user } = useCurrentUser();
+
   const [agencies, setAgencies] = useState<Agency[]>([]);
+  const [users, setUsers] = useState<DjangoUser[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: 'Résidence Les Alizés - Phase 2',
-    reference: 'REF-2024-001',
-    type: 'Résidentiel Collectif',
-    client: '',
-    status: 'En cours de création',
-    priority: 'Haute',
+  const [step, setStep] = useState(1);
+
+  const [formData, setFormData] = useState<FormData>({
+    name: '',
+    reference: '',
+    project_type: 'residentiel_collectif',
+    client_name: '',
     description: '',
-    address: '15 Avenue des Artisans',
-    city: 'Cotonou',
-    startDate: '',
-    endDate: '2023-12-01',
-    center: 'Agence Littoral Nord',
-    manager: 'Marc Vasseur',
-    budget: '1250000',
-    maxStaff: '45',
-    criticality: 'Standard',
-    trackingMode: 'progress'
+    address: '',
+    city: '',
+    agency: '',
+    manager: '',
+    works_supervisor: '',
+    start_date: '',
+    end_date: '',
+    priority: 'haute',
+    criticality: 'standard',
+    budget_amount: '',
+    contract_value: '',
+    currency: 'XOF',
+    surface_m2: '',
+    tracking_mode: 'progress',
+    auto_alerts_enabled: true,
+    movement_slips_enabled: true,
+    ai_assistance_enabled: true,
+    rfid_sync_enabled: false,
+    saveAs: 'planification',
   });
 
   useEffect(() => {
-    let isMounted = true;
-    apiServices.agencies
-      .list()
-      .then((data) => {
-        if (!isMounted) return;
-        setAgencies(data);
-        if (data.length > 0 && !data.some((agency) => agency.name === formData.center)) {
-          setFormData((prev) => ({ ...prev, center: data[0].name }));
-        }
-      })
-      .catch((error) => {
-        console.error('Failed to load agencies:', error);
-      });
+    let cancelled = false;
+    Promise.allSettled([
+      apiServices.agencies.list(),
+      apiServices.users.rawList({ page_size: 200 }),
+    ]).then(([ag, us]) => {
+      if (cancelled) return;
+      if (ag.status === 'fulfilled') {
+        setAgencies(ag.value);
+      }
+      if (us.status === 'fulfilled') {
+        const list = isPaginatedResponse(us.value)
+          ? us.value.results
+          : us.value;
+        setUsers(list);
+      }
+    });
     return () => {
-      isMounted = false;
+      cancelled = true;
     };
   }, []);
 
-  const agencyByName = useMemo(() => {
-    return new Map(agencies.map((agency) => [agency.name, agency.id]));
-  }, [agencies]);
-
-  const projectTypeMap: Record<string, ProjectType> = {
-    'Résidentiel Collectif': 'residentiel_collectif',
-    'Tertiaire / Bureaux': 'tertiaire',
-    'Infrastructure Publique': 'infrastructure_publique',
-  };
-  const priorityMap: Record<string, ProjectPriority> = {
-    Haute: 'haute',
-    Moyenne: 'moyenne',
-    Basse: 'basse',
-  };
-  const criticalityMap: Record<string, ProjectCriticality> = {
-    Standard: 'standard',
-    Sensible: 'sensible',
-    Critique: 'critique',
+  const userLabel = (u: DjangoUser): string => {
+    const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+    return full || u.username || u.email || `#${u.id}`;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const usersSorted = useMemo(
+    () =>
+      [...users].sort((a, b) => userLabel(a).localeCompare(userLabel(b), 'fr')),
+    [users],
+  );
+
+  const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const validateStep = (s: number): string | null => {
+    if (s === 1) {
+      if (!formData.name.trim()) return 'Le nom du chantier est requis.';
+      if (!formData.reference.trim())
+        return 'La référence du chantier est requise.';
+    }
+    if (s === 3) {
+      if (formData.contract_value && Number(formData.contract_value) < 0)
+        return 'La valeur du marché doit être positive.';
+      if (formData.budget_amount && Number(formData.budget_amount) < 0)
+        return 'Le budget doit être positif.';
+    }
+    return null;
+  };
+
+  const goNext = () => {
+    const err = validateStep(step);
+    if (err) {
+      setSubmitError(err);
+      return;
+    }
+    setSubmitError(null);
+    setStep((s) => Math.min(STEPS.length, s + 1));
+  };
+
+  const goPrev = () => {
+    setSubmitError(null);
+    setStep((s) => Math.max(1, s - 1));
+  };
+
+  const handleSubmit = async (
+    e: React.FormEvent,
+    saveAs: ProjectStatus = 'planification',
+  ) => {
     e.preventDefault();
+    for (let s = 1; s <= 3; s++) {
+      const err = validateStep(s);
+      if (err) {
+        setStep(s);
+        setSubmitError(err);
+        return;
+      }
+    }
     setIsSubmitting(true);
     setSubmitError(null);
     const payload: CreateInput<Project> = {
-      name: formData.name,
-      reference: formData.reference,
-      project_type: projectTypeMap[formData.type] ?? 'residentiel_collectif',
-      client_name: formData.client,
-      status: formData.status,
-      priority: priorityMap[formData.priority] ?? 'haute',
-      description: formData.description,
-      address: formData.address,
-      city: formData.city,
-      start_date: formData.startDate || null,
-      end_date: formData.endDate || null,
-      agency: agencyByName.get(formData.center) ?? null,
-      manager: null,
-      works_supervisor: null,
-      budget_amount: formData.budget || null,
-      max_staff: formData.maxStaff ? Number(formData.maxStaff) : null,
-      criticality: criticalityMap[formData.criticality] ?? 'standard',
-      tracking_mode: (formData.trackingMode as ProjectTrackingMode) ?? 'progress',
-      auto_alerts_enabled: true,
-      movement_slips_enabled: true,
-      rfid_sync_enabled: false,
-      ai_assistance_enabled: true,
-      is_draft: false,
+      name: formData.name.trim(),
+      reference: formData.reference.trim(),
+      project_type: formData.project_type,
+      client_name: formData.client_name.trim(),
+      status: saveAs,
+      priority: formData.priority,
+      description: formData.description.trim(),
+      address: formData.address.trim(),
+      city: formData.city.trim(),
+      start_date: formData.start_date || null,
+      end_date: formData.end_date || null,
+      agency: formData.agency || null,
+      manager: formData.manager ? Number(formData.manager) : null,
+      works_supervisor: formData.works_supervisor
+        ? Number(formData.works_supervisor)
+        : null,
+      budget_amount: formData.budget_amount || null,
+      contract_value: formData.contract_value || null,
+      currency: formData.currency || 'XOF',
+      surface_m2: formData.surface_m2 || null,
+      max_staff: null,
+      criticality: formData.criticality,
+      tracking_mode: formData.tracking_mode,
+      auto_alerts_enabled: formData.auto_alerts_enabled,
+      movement_slips_enabled: formData.movement_slips_enabled,
+      rfid_sync_enabled: formData.rfid_sync_enabled,
+      ai_assistance_enabled: formData.ai_assistance_enabled,
+      is_draft: saveAs === 'brouillon',
+      progress_percent: 0,
+      notes: '',
     };
     try {
-      await apiServices.projects.create(payload);
-    } catch (error) {
-      console.error('Failed to save project:', error);
-      setSubmitError('Impossible de créer le projet pour le moment.');
+      const created = await apiServices.projects.create(payload);
+      navigate(`/projects/${created.id}`);
+    } catch (err) {
+      console.error('Failed to save project:', err);
+      setSubmitError(
+        "Impossible de créer le chantier. Vérifiez la référence (unique) et les champs requis.",
+      );
       setIsSubmitting(false);
-      return;
     }
-    setIsSubmitting(false);
-    navigate('/projects');
   };
 
+  if (
+    user &&
+    user.role !== 'administrateur' &&
+    user.role !== 'conducteur_travaux'
+  ) {
+    return (
+      <div className="max-w-2xl mx-auto py-20 text-center space-y-3">
+        <AlertTriangle className="w-10 h-10 text-orange-500 mx-auto" />
+        <h2 className="font-headline text-2xl font-bold text-primary">
+          Accès restreint
+        </h2>
+        <p className="text-sm text-slate-500">
+          Seuls les administrateurs et conducteurs de travaux peuvent créer un
+          chantier.
+        </p>
+        <button
+          onClick={() => navigate('/projects')}
+          className="mt-4 px-6 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold"
+        >
+          Retour aux chantiers
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-[1400px] mx-auto pb-16">
-      {/* Header Actions */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-6">
+    <div className="max-w-[1200px] mx-auto pb-16">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
         <div>
-          <h1 className="text-4xl md:text-[3.5rem] font-extrabold text-primary tracking-tight leading-none mb-4 font-headline">Nouveau Projet</h1>
-          <p className="text-on-primary-container max-w-2xl text-lg">
-            Créez un nouveau chantier et définissez ses informations principales, ses responsables et ses paramètres de suivi.
+          <h1 className="text-3xl md:text-4xl font-extrabold text-primary tracking-tight font-headline">
+            Nouveau Chantier
+          </h1>
+          <p className="text-on-primary-container max-w-2xl text-sm md:text-base mt-2">
+            Créez un nouveau chantier en 4 étapes et définissez ses paramètres
+            de suivi.
           </p>
         </div>
-        <div className="flex flex-wrap gap-4 mb-2">
-          <button 
-            onClick={() => navigate('/projects')}
-            className="px-6 py-2.5 rounded-xl text-slate-600 font-medium hover:bg-slate-100 transition-all"
-          >
-            Annuler
-          </button>
-          <button className="px-6 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-white transition-all shadow-sm">
-            Enregistrer comme brouillon
-          </button>
-          <button 
-            onClick={handleSubmit}
-            className="px-8 py-2.5 rounded-xl bg-primary text-white font-semibold hover:bg-primary-container transition-all shadow-lg flex items-center gap-2"
-          >
-            <span>Créer le projet</span>
-            <Rocket className="w-4 h-4" />
-          </button>
+        <button
+          onClick={() => navigate('/projects')}
+          className="px-5 py-2.5 rounded-xl text-slate-600 font-medium hover:bg-slate-100 transition-all text-sm"
+        >
+          Annuler
+        </button>
+      </div>
+
+      {/* Stepper */}
+      <div className="mb-10 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="flex items-center justify-between">
+          {STEPS.map((s, idx) => {
+            const isActive = step === s.id;
+            const isDone = step > s.id;
+            return (
+              <React.Fragment key={s.id}>
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      'w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border-2 transition-all',
+                      isDone
+                        ? 'bg-primary text-white border-primary'
+                        : isActive
+                        ? 'bg-primary/10 text-primary border-primary'
+                        : 'bg-slate-50 text-slate-400 border-slate-200',
+                    )}
+                  >
+                    {isDone ? <Check className="w-4 h-4" /> : s.id}
+                  </div>
+                  <div className="hidden md:block">
+                    <p
+                      className={cn(
+                        'text-xs font-bold uppercase tracking-widest',
+                        isActive || isDone ? 'text-primary' : 'text-slate-400',
+                      )}
+                    >
+                      Étape {s.id}
+                    </p>
+                    <p
+                      className={cn(
+                        'text-sm font-semibold',
+                        isActive || isDone ? 'text-primary' : 'text-slate-500',
+                      )}
+                    >
+                      {s.label}
+                    </p>
+                  </div>
+                </div>
+                {idx < STEPS.length - 1 ? (
+                  <div
+                    className={cn(
+                      'flex-1 h-px mx-4',
+                      step > s.id ? 'bg-primary' : 'bg-slate-200',
+                    )}
+                  />
+                ) : null}
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
 
-      {/* Grid Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-        {/* Left: Form */}
-        <div className="lg:col-span-9 space-y-10">
-          {submitError ? (
-            <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-3 text-sm text-error">
-              {submitError}
-            </div>
-          ) : null}
-          {/* Section 1: General */}
-          <section className="bg-white p-8 rounded-2xl shadow-[0_20px_40px_rgba(9,20,38,0.02)] border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
-              <span className="w-1.5 h-6 bg-primary rounded-full"></span>
-              <h2 className="text-xl font-bold text-primary font-headline">Informations générales</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Nom du projet</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  type="text" 
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                />
-                <p className="text-error text-[10px] mt-2 flex items-center gap-1 font-bold">
-                  <Info className="w-3 h-3" />
-                  Le nom est requis pour la validation du dossier.
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Référence</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  placeholder="REF-2024-001" 
-                  type="text"
-                  value={formData.reference}
-                  onChange={(e) => setFormData({...formData, reference: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Type de chantier</label>
-                <div className="relative">
-                  <select 
-                    className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all appearance-none"
-                    value={formData.type}
-                    onChange={(e) => setFormData({...formData, type: e.target.value})}
-                  >
-                    <option>Résidentiel Collectif</option>
-                    <option>Tertiaire / Bureaux</option>
-                    <option>Infrastructure Publique</option>
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Client</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  placeholder="Nom du maître d'ouvrage" 
-                  type="text"
-                  value={formData.client}
-                  onChange={(e) => setFormData({...formData, client: e.target.value})}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Statut</label>
-                  <div className="px-4 py-2 rounded-full bg-secondary-fixed text-on-secondary-container text-[10px] font-bold w-fit uppercase tracking-wider">
-                    {formData.status}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Priorité</label>
-                  <div className="relative">
-                    <select 
-                      className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 py-2 text-sm text-primary focus:ring-2 focus:ring-primary transition-all appearance-none"
-                      value={formData.priority}
-                      onChange={(e) => setFormData({...formData, priority: e.target.value})}
-                    >
-                      <option>Haute</option>
-                      <option>Moyenne</option>
-                      <option>Basse</option>
-                    </select>
-                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  </div>
-                </div>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Description du projet</label>
-                <textarea 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all resize-none" 
-                  placeholder="Détails techniques, contraintes spécifiques..." 
-                  rows={3}
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                ></textarea>
-              </div>
-            </div>
-          </section>
+      {submitError ? (
+        <div className="mb-6 rounded-xl border border-error/20 bg-error-container/20 px-4 py-3 text-sm text-error flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4" />
+          {submitError}
+        </div>
+      ) : null}
 
-          {/* Section 2: Location & Planning */}
-          <section className="bg-white p-8 rounded-2xl shadow-[0_20px_40px_rgba(9,20,38,0.02)] border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
+      <form
+        onSubmit={(e) => handleSubmit(e, formData.saveAs)}
+        className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 space-y-8"
+      >
+        {/* Étape 1 — Informations générales */}
+        {step === 1 ? (
+          <>
+            <div className="flex items-center gap-3">
               <span className="w-1.5 h-6 bg-primary rounded-full"></span>
-              <h2 className="text-xl font-bold text-primary font-headline">Localisation et planification</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Adresse du site</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  placeholder="15 Avenue des Artisans" 
-                  type="text"
-                  value={formData.address}
-                  onChange={(e) => setFormData({...formData, address: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Ville / Zone</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  placeholder="Cotonou" 
-                  type="text"
-                  value={formData.city}
-                  onChange={(e) => setFormData({...formData, city: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Date début</label>
-                <div className="relative">
-                  <input 
-                    className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                    type="date"
-                    value={formData.startDate}
-                    onChange={(e) => setFormData({...formData, startDate: e.target.value})}
-                  />
-                  <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Date fin prévue</label>
-                <div className="relative">
-                  <input 
-                    className="w-full bg-surface-container-highest/50 border-2 border-error/20 rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                    type="date" 
-                    value={formData.endDate}
-                    onChange={(e) => setFormData({...formData, endDate: e.target.value})}
-                  />
-                  <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-                </div>
-                <p className="text-error text-[10px] mt-2 flex items-center gap-1 font-bold">
-                  <AlertTriangle className="w-3 h-3" />
-                  Date de fin invalide par rapport au planning.
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Centre de rattachement</label>
-                <div className="relative">
-                  <select 
-                    className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all appearance-none"
-                    value={formData.center}
-                    onChange={(e) => setFormData({...formData, center: e.target.value})}
-                  >
-                    {agencies.length > 0 ? (
-                      agencies.map((agency) => (
-                        <option key={agency.id}>{agency.name}</option>
-                      ))
-                    ) : (
-                      <option>Agence Littoral Nord</option>
-                    )}
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Responsable Projet</label>
-                <div className="flex items-center gap-3 bg-surface-container-highest/50 rounded-xl p-2 pr-4 border border-slate-100">
-                  <img 
-                    className="w-10 h-10 rounded-full object-cover" 
-                    src="https://picsum.photos/seed/manager/100/100" 
-                    alt="Marc Vasseur" 
-                    referrerPolicy="no-referrer"
-                  />
-                  <span className="text-sm font-bold text-primary">Marc Vasseur</span>
-                </div>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Conducteur de travaux</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  placeholder="Rechercher un collaborateur..." 
-                  type="text"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* Section 3: Budget */}
-          <section className="bg-white p-8 rounded-2xl shadow-[0_20px_40px_rgba(9,20,38,0.02)] border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
-              <span className="w-1.5 h-6 bg-primary rounded-full"></span>
-              <h2 className="text-xl font-bold text-primary font-headline">Cadrage budgétaire</h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Budget Prévisionnel</label>
-                <div className="relative">
-                  <input 
-                    className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary font-bold text-lg focus:ring-2 focus:ring-primary transition-all" 
-                    placeholder="1 250 000" 
-                    type="number"
-                    value={formData.budget}
-                    onChange={(e) => setFormData({...formData, budget: e.target.value})}
-                  />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">FCFA</span>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Effectif max</label>
-                <input 
-                  className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all" 
-                  placeholder="45" 
-                  type="number"
-                  value={formData.maxStaff}
-                  onChange={(e) => setFormData({...formData, maxStaff: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Criticité</label>
-                <div className="relative">
-                  <select 
-                    className="w-full bg-surface-container-highest/50 border-none rounded-xl p-4 text-primary focus:ring-2 focus:ring-primary transition-all appearance-none"
-                    value={formData.criticality}
-                    onChange={(e) => setFormData({...formData, criticality: e.target.value})}
-                  >
-                    <option>Standard</option>
-                    <option>Sensible</option>
-                    <option>Critique</option>
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Mode de suivi analytique</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    type="button"
-                    onClick={() => setFormData({...formData, trackingMode: 'progress'})}
-                    className={cn(
-                      "p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all",
-                      formData.trackingMode === 'progress' 
-                        ? "bg-primary text-white shadow-lg shadow-primary/20" 
-                        : "bg-surface-container-highest/50 text-slate-600 hover:bg-surface-container-highest"
-                    )}
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                    Avancement %
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setFormData({...formData, trackingMode: 'hours'})}
-                    className={cn(
-                      "p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all",
-                      formData.trackingMode === 'hours' 
-                        ? "bg-primary text-white shadow-lg shadow-primary/20" 
-                        : "bg-surface-container-highest/50 text-slate-600 hover:bg-surface-container-highest"
-                    )}
-                  >
-                    <Clock className="w-4 h-4" />
-                    Heures réelles
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Section 4: Resources */}
-          <section className="bg-white p-8 rounded-2xl shadow-[0_20px_40px_rgba(9,20,38,0.02)] border border-slate-100">
-            <div className="flex justify-between items-center mb-8">
-              <div className="flex items-center gap-3">
-                <span className="w-1.5 h-6 bg-primary rounded-full"></span>
-                <h2 className="text-xl font-bold text-primary font-headline">Ressources initiales</h2>
-              </div>
-              <button className="flex items-center gap-2 text-primary font-bold text-xs bg-primary-fixed/50 px-4 py-2 rounded-xl hover:bg-primary hover:text-white transition-all">
-                <Plus className="w-4 h-4" />
-                Ajouter une ressource
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-4 bg-surface-container-low/50 rounded-xl border border-slate-50">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-white shadow-sm flex items-center justify-center">
-                    <Truck className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-primary">Grue à tour G20</div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Matériel lourd</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-8">
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-primary">Dispo : 12/05</div>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold">Planning validé</div>
-                  </div>
-                  <button className="p-2 text-slate-300 hover:text-error hover:bg-error/5 rounded-lg transition-all">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-4 bg-surface-container-low/50 rounded-xl border border-slate-50">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-white shadow-sm flex items-center justify-center">
-                    <HardHat className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-primary">Équipe Coffrage Pro</div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Sous-traitance</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-8">
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-primary">8 pers.</div>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold">Contrat signé</div>
-                  </div>
-                  <button className="p-2 text-slate-300 hover:text-error hover:bg-error/5 rounded-lg transition-all">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Section 5: Settings */}
-          <section className="bg-white p-8 rounded-2xl shadow-[0_20px_40px_rgba(9,20,38,0.02)] border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
-              <span className="w-1.5 h-6 bg-primary rounded-full"></span>
-              <h2 className="text-xl font-bold text-primary font-headline">Paramètres de suivi</h2>
+              <h2 className="text-xl font-bold text-primary font-headline">
+                Informations générales
+              </h2>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <label className="flex items-start gap-4 p-5 rounded-2xl border border-slate-50 hover:bg-surface-container-low/50 transition-all cursor-pointer group">
-                <div className="relative flex items-center">
-                  <input defaultChecked className="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary transition-all" type="checkbox" />
-                </div>
-                <div>
-                  <div className="font-bold text-primary">Alertes automatiques</div>
-                  <p className="text-xs text-slate-500 leading-relaxed">Notifications push pour les retards critiques et dépassements budget.</p>
-                </div>
-              </label>
-              <label className="flex items-start gap-4 p-5 rounded-2xl border border-slate-50 hover:bg-surface-container-low/50 transition-all cursor-pointer group">
-                <div className="relative flex items-center">
-                  <input defaultChecked className="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary transition-all" type="checkbox" />
-                </div>
-                <div>
-                  <div className="font-bold text-primary">Mouvements de stocks</div>
-                  <p className="text-xs text-slate-500 leading-relaxed">Générer un bordereau pour chaque entrée/sortie de matériel.</p>
-                </div>
-              </label>
-              <label className="flex items-start gap-4 p-5 rounded-2xl border border-slate-50 hover:bg-surface-container-low/50 transition-all cursor-pointer group">
-                <div className="relative flex items-center">
-                  <input className="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary transition-all" type="checkbox" />
-                </div>
-                <div>
-                  <div className="font-bold text-primary">Suivi matériel RFID</div>
-                  <p className="text-xs text-slate-500 leading-relaxed">Synchroniser les données avec les balises actives sur site.</p>
-                </div>
-              </label>
-              <label className="flex items-start gap-4 p-5 rounded-2xl bg-primary-fixed/20 border border-primary/5 transition-all cursor-pointer group">
-                <div className="relative flex items-center">
-                  <input defaultChecked className="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary transition-all" type="checkbox" />
-                </div>
-                <div>
-                  <div className="font-bold text-primary flex items-center gap-2">
-                    Assistance IA Pro
-                    <span className="text-[8px] bg-primary text-white px-2 py-0.5 rounded-full uppercase tracking-tighter font-black">Premium</span>
-                  </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">Prédire les goulots d'étranglement basés sur l'historique.</p>
-                </div>
-              </label>
-            </div>
-          </section>
-
-          <div className="flex justify-end gap-4 pt-10">
-            <button 
-              onClick={() => navigate('/projects')}
-              className="px-8 py-3 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-white transition-all shadow-sm"
-            >
-              Annuler
-            </button>
-            <button 
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="px-12 py-3 rounded-xl bg-primary text-white font-black hover:bg-primary-container transition-all shadow-[0_10px_20px_rgba(9,20,38,0.2)] flex items-center gap-3"
-            >
-              <span>{isSubmitting ? 'CRÉATION...' : 'CRÉER LE PROJET'}</span>
-              <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Side Panel */}
-        <aside className="lg:col-span-3 space-y-8 sticky top-24">
-          {/* IA Suggestion Card */}
-          <div className="bg-primary-container text-white p-8 rounded-3xl shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md">
-                <Bot className="w-6 h-6 text-white" />
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Nom du chantier *
+                </label>
+                <input
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  placeholder="Résidence Les Alizés"
+                />
               </div>
               <div>
-                <h3 className="font-bold text-lg leading-tight font-headline">Suggestion IA</h3>
-                <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Analyse prédictive</p>
-              </div>
-            </div>
-            <div className="space-y-6">
-              <div className="p-4 bg-white/5 rounded-2xl border border-white/10 backdrop-blur-sm">
-                <p className="text-xs text-white/80 leading-relaxed italic">
-                  "D'après le descriptif, ce projet s'apparente à la catégorie <span className="text-primary-fixed font-black">Gros œuvre</span>."
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Référence *
+                </label>
+                <input
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                  type="text"
+                  value={formData.reference}
+                  onChange={(e) => updateField('reference', e.target.value)}
+                  placeholder="REF-2026-001"
+                />
+                <p className="text-[10px] mt-1 text-slate-400 flex items-center gap-1">
+                  <Info className="w-3 h-3" />
+                  La référence doit être unique.
                 </p>
               </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/50">Risque initial :</span>
-                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded text-[10px] font-black uppercase tracking-wider">Faible</span>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Type de chantier *
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.project_type}
+                    onChange={(e) =>
+                      updateField('project_type', e.target.value as ProjectType)
+                    }
+                  >
+                    <option value="residentiel_collectif">
+                      Résidentiel Collectif
+                    </option>
+                    <option value="tertiaire">Tertiaire / Bureaux</option>
+                    <option value="infrastructure_publique">
+                      Infrastructure Publique
+                    </option>
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                 </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/50">Optimisation :</span>
-                  <span className="font-bold text-white/90">Conseillée</span>
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Client / Maître d'ouvrage
+                </label>
+                <input
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                  type="text"
+                  value={formData.client_name}
+                  onChange={(e) => updateField('client_name', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Ville
+                </label>
+                <input
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                  type="text"
+                  value={formData.city}
+                  onChange={(e) => updateField('city', e.target.value)}
+                  placeholder="Cotonou"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Adresse du site
+                </label>
+                <input
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                  type="text"
+                  value={formData.address}
+                  onChange={(e) => updateField('address', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Agence
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.agency}
+                    onChange={(e) => updateField('agency', e.target.value)}
+                  >
+                    <option value="">— Aucune —</option>
+                    {agencies.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                 </div>
               </div>
-              <button className="w-full py-3 bg-white text-primary rounded-xl font-black text-xs hover:bg-primary-fixed transition-all shadow-lg">
-                Appliquer les paramètres IA
-              </button>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Description
+                </label>
+                <textarea
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none resize-none"
+                  rows={3}
+                  value={formData.description}
+                  onChange={(e) => updateField('description', e.target.value)}
+                  placeholder="Détails techniques, contraintes spécifiques…"
+                />
+              </div>
             </div>
-          </div>
+          </>
+        ) : null}
 
-          {/* Dynamic Summary Card */}
-          <div className="bg-white p-8 rounded-3xl shadow-[0_20px_40px_rgba(9,20,38,0.05)] border border-slate-50">
-            <h3 className="font-bold text-primary mb-8 flex items-center gap-3 font-headline">
-              <ClipboardCheck className="w-5 h-5 text-primary" />
-              Résumé du projet
-            </h3>
-            <div className="space-y-8">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Responsable</span>
-                <span className="text-sm font-bold text-primary">{formData.manager}</span>
+        {/* Étape 2 — Équipe & Planning */}
+        {step === 2 ? (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="w-1.5 h-6 bg-primary rounded-full"></span>
+              <h2 className="text-xl font-bold text-primary font-headline">
+                Équipe & Planning
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Chef de chantier
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.manager}
+                    onChange={(e) => updateField('manager', e.target.value)}
+                  >
+                    <option value="">— Aucun —</option>
+                    {usersSorted.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {userLabel(u)}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Budget global</span>
-                <span className="text-2xl font-black text-primary">{Number(formData.budget).toLocaleString()} FCFA</span>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Conducteur de travaux
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.works_supervisor}
+                    onChange={(e) =>
+                      updateField('works_supervisor', e.target.value)
+                    }
+                  >
+                    <option value="">— Aucun —</option>
+                    {usersSorted.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {userLabel(u)}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Période</span>
-                <span className="text-sm font-bold text-primary">Jan 2024 - Déc 2024</span>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Date de début
+                </label>
+                <div className="relative">
+                  <input
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                    type="date"
+                    value={formData.start_date}
+                    onChange={(e) => updateField('start_date', e.target.value)}
+                  />
+                  <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Lieu</span>
-                <span className="text-sm font-bold text-primary">{formData.city}, Bénin</span>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Date de fin prévisionnelle
+                </label>
+                <div className="relative">
+                  <input
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                    type="date"
+                    value={formData.end_date}
+                    onChange={(e) => updateField('end_date', e.target.value)}
+                  />
+                  <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Priorité *
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.priority}
+                    onChange={(e) =>
+                      updateField('priority', e.target.value as ProjectPriority)
+                    }
+                  >
+                    <option value="haute">Haute</option>
+                    <option value="moyenne">Moyenne</option>
+                    <option value="basse">Basse</option>
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Criticité *
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.criticality}
+                    onChange={(e) =>
+                      updateField(
+                        'criticality',
+                        e.target.value as ProjectCriticality,
+                      )
+                    }
+                  >
+                    <option value="standard">Standard</option>
+                    <option value="sensible">Sensible</option>
+                    <option value="critique">Critique</option>
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
               </div>
             </div>
-            <div className="mt-10 pt-8 border-t border-slate-50">
-              <div className="flex items-center gap-3 text-slate-400">
-                <Package className="w-4 h-4" />
-                <span className="text-xs font-medium italic">2 ressources assignées</span>
-              </div>
-            </div>
-          </div>
+          </>
+        ) : null}
 
-          {/* Mini Visual Map */}
-          <div className="h-56 w-full rounded-3xl relative overflow-hidden shadow-2xl group">
-            <img 
-              className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
-              src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=800" 
-              alt="Plan Google Maps Cotonou" 
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-primary/90 via-primary/20 to-transparent"></div>
-            <div className="absolute bottom-6 left-6 right-6">
-              <p className="text-white text-xs font-black leading-tight mb-1">Zone d'intervention : Cotonou</p>
-              <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest">Identifié par GPS</p>
+        {/* Étape 3 — Budget */}
+        {step === 3 ? (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="w-1.5 h-6 bg-primary rounded-full"></span>
+              <h2 className="text-xl font-bold text-primary font-headline">
+                Cadrage budgétaire
+              </h2>
             </div>
-          </div>
-        </aside>
-      </div>
+            <div className="rounded-xl bg-primary/5 px-4 py-3 text-xs text-primary flex items-start gap-2">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Les lignes budgétaires détaillées (matériaux, MO, sous-traitance,
+                etc.) pourront être ajoutées depuis la page du chantier, dans
+                l'onglet « Budget ».
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Budget global prévisionnel
+                </label>
+                <div className="relative">
+                  <input
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary font-bold focus:ring-2 focus:ring-primary outline-none"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.budget_amount}
+                    onChange={(e) =>
+                      updateField('budget_amount', e.target.value)
+                    }
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">
+                    {formData.currency}
+                  </span>
+                </div>
+                {!formData.budget_amount ? (
+                  <p className="text-[10px] mt-1 text-orange-600 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Aucun budget renseigné : impossible de suivre l'écart
+                    budget/réalisé.
+                  </p>
+                ) : null}
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Valeur du marché / contrat
+                </label>
+                <div className="relative">
+                  <input
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.contract_value}
+                    onChange={(e) =>
+                      updateField('contract_value', e.target.value)
+                    }
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">
+                    {formData.currency}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Devise *
+                </label>
+                <div className="relative">
+                  <select
+                    className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none appearance-none"
+                    value={formData.currency}
+                    onChange={(e) => updateField('currency', e.target.value)}
+                  >
+                    <option value="XOF">XOF — Franc CFA (BCEAO)</option>
+                    <option value="EUR">EUR — Euro</option>
+                    <option value="USD">USD — Dollar US</option>
+                    <option value="CNY">CNY — Yuan</option>
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">
+                  Surface (m²)
+                </label>
+                <input
+                  className="w-full bg-surface-container-highest/50 rounded-xl p-3.5 text-primary focus:ring-2 focus:ring-primary outline-none"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.surface_m2}
+                  onChange={(e) => updateField('surface_m2', e.target.value)}
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {/* Étape 4 — Options */}
+        {step === 4 ? (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="w-1.5 h-6 bg-primary rounded-full"></span>
+              <h2 className="text-xl font-bold text-primary font-headline">
+                Paramètres de suivi
+              </h2>
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">
+                Mode de suivi analytique
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => updateField('tracking_mode', 'progress')}
+                  className={cn(
+                    'p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all',
+                    formData.tracking_mode === 'progress'
+                      ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                      : 'bg-surface-container-highest/50 text-slate-600 hover:bg-surface-container-highest',
+                  )}
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  Avancement %
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateField('tracking_mode', 'hours')}
+                  className={cn(
+                    'p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all',
+                    formData.tracking_mode === 'hours'
+                      ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                      : 'bg-surface-container-highest/50 text-slate-600 hover:bg-surface-container-highest',
+                  )}
+                >
+                  <Clock className="w-4 h-4" />
+                  Heures réelles
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(
+                [
+                  {
+                    key: 'auto_alerts_enabled',
+                    title: 'Alertes automatiques',
+                    desc: 'Notifications pour retards et dépassements budget.',
+                  },
+                  {
+                    key: 'movement_slips_enabled',
+                    title: 'Bons de mouvement',
+                    desc: 'Générer un bordereau pour chaque entrée/sortie.',
+                  },
+                  {
+                    key: 'ai_assistance_enabled',
+                    title: 'Assistance IA',
+                    desc: 'Prédictions et suggestions basées sur l\'historique.',
+                  },
+                  {
+                    key: 'rfid_sync_enabled',
+                    title: 'Suivi RFID',
+                    desc: 'Synchronisation des balises actives sur site.',
+                  },
+                ] as const
+              ).map((opt) => (
+                <label
+                  key={opt.key}
+                  className="flex items-start gap-4 p-4 rounded-2xl border border-slate-100 hover:bg-surface-container-low/50 transition-all cursor-pointer"
+                >
+                  <input
+                    className="w-5 h-5 rounded border-slate-300 text-primary focus:ring-primary mt-0.5"
+                    type="checkbox"
+                    checked={formData[opt.key]}
+                    onChange={(e) => updateField(opt.key, e.target.checked)}
+                  />
+                  <div>
+                    <div className="font-bold text-primary text-sm">
+                      {opt.title}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="border-t border-slate-100 pt-6">
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">
+                Enregistrement
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => updateField('saveAs', 'brouillon')}
+                  className={cn(
+                    'p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border-2 transition-all',
+                    formData.saveAs === 'brouillon'
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-slate-200 text-slate-500',
+                  )}
+                >
+                  Enregistrer en brouillon
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateField('saveAs', 'planification')}
+                  className={cn(
+                    'p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border-2 transition-all',
+                    formData.saveAs === 'planification'
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-slate-200 text-slate-500',
+                  )}
+                >
+                  Publier (En planification)
+                </button>
+              </div>
+            </div>
+
+            {/* Résumé */}
+            <div className="bg-surface-container-low/50 p-5 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-2 mb-3 text-primary">
+                <ClipboardCheck className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-widest">
+                  Résumé
+                </span>
+              </div>
+              <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-6 text-sm">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500">Nom</dt>
+                  <dd className="font-semibold text-primary text-right">
+                    {formData.name || '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500">Référence</dt>
+                  <dd className="font-semibold text-primary text-right">
+                    {formData.reference || '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500">Budget</dt>
+                  <dd className="font-semibold text-primary text-right">
+                    {formData.budget_amount
+                      ? `${Number(formData.budget_amount).toLocaleString(
+                          'fr-FR',
+                        )} ${formData.currency}`
+                      : '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500">Période</dt>
+                  <dd className="font-semibold text-primary text-right">
+                    {(formData.start_date || '—') +
+                      ' → ' +
+                      (formData.end_date || '—')}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </>
+        ) : null}
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between border-t border-slate-100 pt-6">
+          <button
+            type="button"
+            onClick={goPrev}
+            disabled={step === 1}
+            className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Précédent
+          </button>
+          {step < STEPS.length ? (
+            <button
+              type="button"
+              onClick={goNext}
+              className="px-6 py-2.5 rounded-xl bg-primary text-white font-semibold text-sm shadow-md flex items-center gap-2"
+            >
+              Suivant
+              <ChevronRightIcon className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-8 py-2.5 rounded-xl bg-primary text-white font-bold text-sm shadow-md disabled:opacity-50 flex items-center gap-2"
+            >
+              {isSubmitting ? (
+                'Création…'
+              ) : (
+                <>
+                  Créer le chantier
+                  {formData.saveAs === 'brouillon' ? (
+                    <span className="text-[10px] font-medium opacity-75">
+                      (brouillon)
+                    </span>
+                  ) : null}
+                  <Rocket className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </form>
     </div>
   );
 }
