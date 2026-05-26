@@ -13,6 +13,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import NewProjectPage from './pages/NewProjectPage';
 import StoragePage from './pages/StoragePage';
 import NewStoragePage from './pages/NewStoragePage';
+import StorageDetailPage from './pages/StorageDetailPage';
 import AlertsPage from './pages/AlertsPage';
 import AuditsPage from './pages/AuditsPage';
 import AIAssistantPage from './pages/AIAssistantPage';
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="/projects/new" element={<NewProjectPage />} />
             <Route path="/storage" element={<StoragePage />} />
             <Route path="/storage/new" element={<NewStoragePage />} />
+            <Route path="/storage/:id" element={<StorageDetailPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/audits" element={<AuditsPage />} />
             <Route path="/ai-assistant" element={<AIAssistantPage />} />

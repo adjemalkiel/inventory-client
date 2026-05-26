@@ -85,11 +85,53 @@ export interface StorageLocation extends ApiAudit {
   name: string;
   storage_type: StorageType;
   address: string;
+  city: string;
+  agency: UUID | null;
+  project: UUID | null;
+  latitude: string | null;
+  longitude: string | null;
   manager_name: string;
   manager_user: UserId | null;
   capacity_m2: string | null;
   notes: string;
   is_active: boolean;
+  agency_name?: string | null;
+  project_name?: string | null;
+  project_reference?: string | null;
+  manager_display?: string | null;
+  stock_items_count?: number;
+  stock_value?: string | null;
+  critical_count?: number;
+}
+
+export interface StorageLocationSummary {
+  location_id: UUID;
+  name: string;
+  storage_type: StorageType;
+  is_active: boolean;
+  items_count: number;
+  stock_value: string;
+  stockout_count: number;
+  critical_count: number;
+  movements_today: number;
+  movements_week: number;
+  zones: string[];
+  zones_count: number;
+  capacity_m2: string | null;
+  capacity_percent: number | null;
+  has_coordinates: boolean;
+}
+
+export interface StorageZoneInfo {
+  zone_label: string;
+  zone_display: string;
+  items_count: number;
+  total_quantity: string;
+}
+
+export interface StorageLocationZonesResponse {
+  location_id: UUID;
+  zones: StorageZoneInfo[];
 }
 
 export interface UnitOfMeasure extends ApiAudit {

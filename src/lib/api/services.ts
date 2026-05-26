@@ -37,6 +37,8 @@ import type {
   StockMovement,
   StockMovementCreatePayload,
   StorageLocation,
+  StorageLocationSummary,
+  StorageLocationZonesResponse,
   Supplier,
   UnitOfMeasure,
   UserProfile,
@@ -236,7 +238,13 @@ export const apiServices = {
   },
   sites: createCrudService<Site>('sites'),
   agencies: createCrudService<Agency>('agencies'),
-  storageLocations: createCrudService<StorageLocation>('storage-locations'),
+  storageLocations: {
+    ...createCrudService<StorageLocation>('storage-locations'),
+    summary: (id: UUID) =>
+      unwrap(http.get<StorageLocationSummary>(`storage-locations/${id}/summary/`)),
+    zones: (id: UUID) =>
+      unwrap(http.get<StorageLocationZonesResponse>(`storage-locations/${id}/zones/`)),
+  },
   unitsOfMeasure: createCrudService<UnitOfMeasure>('units-of-measure'),
   categories: createCrudService<Category>('categories'),
   userProfiles: createCrudService<UserProfile, CreateUserProfileInput, Partial<CreateUserProfileInput>>('user-profiles'),
