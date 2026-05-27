@@ -365,6 +365,12 @@ export interface StockBalance extends ApiAudit {
   zone_label: string;
   quantity: string;
   storage_location_name?: string;
+  item_name?: string;
+  item_sku?: string;
+  item_category_name?: string | null;
+  item_unit_name?: string | null;
+  item_unit_price?: string | null;
+  item_min_stock?: string;
 }
 
 export interface Project extends ApiAudit {
@@ -483,6 +489,8 @@ export interface StockMovement extends ApiAudit {
   source_storage_location_name?: string | null;
   destination_storage_location_name?: string | null;
   project_name?: string | null;
+  project_reference?: string | null;
+  project_status?: ProjectStatus | null;
   created_by_name?: string | null;
   approved_by_name?: string | null;
 }

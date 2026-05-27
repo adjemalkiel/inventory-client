@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Loader2,
   MapPin,
+  Pencil,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -407,12 +408,24 @@ export default function StoragePage() {
                           {loc.project_reference || loc.project_name || '—'}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <Link
-                            to={`/storage/${loc.id}`}
-                            className="inline-flex items-center gap-1 text-primary hover:underline text-xs font-medium"
-                          >
-                            Voir <ChevronRight className="w-4 h-4" />
-                          </Link>
+                          <div className="inline-flex items-center gap-3 justify-end">
+                            {canCreate ? (
+                              <Link
+                                to={`/storage/${loc.id}/edit`}
+                                className="inline-flex items-center gap-1 text-slate-500 hover:text-primary text-xs font-medium"
+                                title="Modifier"
+                              >
+                                <Pencil className="w-4 h-4" />
+                                <span className="hidden sm:inline">Modifier</span>
+                              </Link>
+                            ) : null}
+                            <Link
+                              to={`/storage/${loc.id}`}
+                              className="inline-flex items-center gap-1 text-primary hover:underline text-xs font-medium"
+                            >
+                              Voir <ChevronRight className="w-4 h-4" />
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     );

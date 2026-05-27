@@ -9,6 +9,7 @@ import {
   Loader2,
   MapPin,
   Package,
+  Pencil,
   Plus,
   TrendingUp,
   User,
@@ -18,7 +19,7 @@ import {
 import { apiServices } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type {
-  Item,
+  ProjectStatus,
   StockBalance,
   StockMovement,
   StorageLocation,
@@ -196,12 +197,20 @@ export default function StorageDetailPage() {
             </div>
           </div>
         </div>
-        <Link
-          to={`/inventory/new-movement?destinationLocationId=${location.id}`}
-          className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:shadow-primary/20 transition"
-        >
-          <Plus className="w-4 h-4" /> Mouvement
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/storage/${location.id}/edit`}
+            className="inline-flex items-center gap-2 bg-white border border-surface-container-high text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold hover:text-primary transition"
+          >
+            <Pencil className="w-4 h-4" /> Modifier
+          </Link>
+          <Link
+            to={`/inventory/new-movement?destinationLocationId=${location.id}`}
+            className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:shadow-primary/20 transition"
+          >
+            <Plus className="w-4 h-4" /> Mouvement
+          </Link>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -410,6 +419,16 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+type StockStatus = 'available' | 'low' | 'stockout';
+
+function computeStatus(b: StockBalance): StockStatus {
+  const qty = Number(b.quantity);
+  const min = Number(b.item_min_stock ?? 0);
+  if (qty <= 0) return 'stockout';
+  if (qty < min) return 'low';
+  return 'available';
+}
+
 function StockTab({
   locationId,
   zones,
@@ -418,10 +437,10 @@ function StockTab({
   zones: StorageZoneInfo[];
 }) {
   const [balances, setBalances] = useState<StockBalance[]>([]);
-  const [items, setItems] = useState<Record<string, Item>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoneFilter, setZoneFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | StockStatus>('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -435,21 +454,8 @@ function StockTab({
     if (zoneFilter) params.zone_label = zoneFilter;
     apiServices.stockBalances
       .list(params)
-      .then(async (bal) => {
-        if (cancelled) return;
-        setBalances(bal);
-        const ids = Array.from(new Set(bal.map((b) => b.item)));
-        const itemMap: Record<string, Item> = {};
-        await Promise.all(
-          ids.map(async (iid) => {
-            try {
-              itemMap[iid] = await apiServices.items.get(iid);
-            } catch {
-              // ignore
-            }
-          }),
-        );
-        if (!cancelled) setItems(itemMap);
+      .then((bal) => {
+        if (!cancelled) setBalances(bal);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -464,37 +470,56 @@ function StockTab({
     };
   }, [locationId, zoneFilter]);
 
+  const filtered = useMemo(() => {
+    if (statusFilter === 'all') return balances;
+    return balances.filter((b) => computeStatus(b) === statusFilter);
+  }, [balances, statusFilter]);
+
   const totals = useMemo(() => {
     let totalValue = 0;
     let stockouts = 0;
-    balances.forEach((b) => {
-      const item = items[b.item];
+    filtered.forEach((b) => {
       const qty = Number(b.quantity);
-      const price = Number(item?.unit_price ?? 0);
+      const price = Number(b.item_unit_price ?? 0);
       totalValue += qty * price;
       if (qty <= 0) stockouts += 1;
     });
     return { totalValue, stockouts };
-  }, [balances, items]);
+  }, [filtered]);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <h3 className="font-headline font-bold text-lg text-primary">
-          Stock du lieu ({balances.length})
+          Stock du lieu ({filtered.length}
+          {filtered.length !== balances.length ? ` / ${balances.length}` : ''})
         </h3>
-        <select
-          value={zoneFilter}
-          onChange={(e) => setZoneFilter(e.target.value)}
-          className="px-3 py-2 bg-white border border-surface-container-high rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none"
-        >
-          <option value="">Toutes les zones</option>
-          {zones.map((z) => (
-            <option key={z.zone_label || '__main__'} value={z.zone_label}>
-              {z.zone_display}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as 'all' | StockStatus)
+            }
+            className="px-3 py-2 bg-white border border-surface-container-high rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none"
+          >
+            <option value="all">Tous les statuts</option>
+            <option value="available">Disponible</option>
+            <option value="low">Critique</option>
+            <option value="stockout">Rupture</option>
+          </select>
+          <select
+            value={zoneFilter}
+            onChange={(e) => setZoneFilter(e.target.value)}
+            className="px-3 py-2 bg-white border border-surface-container-high rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none"
+          >
+            <option value="">Toutes les zones</option>
+            {zones.map((z) => (
+              <option key={z.zone_label || '__main__'} value={z.zone_label}>
+                {z.zone_display}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-surface-container-high overflow-hidden">
@@ -504,14 +529,16 @@ function StockTab({
           </div>
         ) : error ? (
           <div className="px-8 py-12 text-center text-error">{error}</div>
-        ) : balances.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="px-8 py-12 text-center text-slate-500 text-sm">
             <Package className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            Aucun stock dans ce lieu.
+            {balances.length === 0
+              ? 'Aucun stock dans ce lieu.'
+              : 'Aucun article ne correspond aux filtres.'}
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[800px]">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
                 <tr className="bg-surface-container-high/50 border-b border-slate-100">
                   <th className="px-6 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
@@ -521,10 +548,16 @@ function StockTab({
                     SKU
                   </th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Catégorie
+                  </th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                     Zone
                   </th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">
                     Quantité
+                  </th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Unité
                   </th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">
                     Valeur
@@ -535,39 +568,48 @@ function StockTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {balances.map((b) => {
-                  const item = items[b.item];
+                {filtered.map((b) => {
                   const qty = Number(b.quantity);
-                  const price = Number(item?.unit_price ?? 0);
-                  const min = Number(item?.min_stock ?? 0);
+                  const price = Number(b.item_unit_price ?? 0);
                   const value = qty * price;
-                  let status: { label: string; cls: string } = {
-                    label: 'Disponible',
-                    cls: 'bg-secondary-container text-on-secondary-fixed-variant',
-                  };
-                  if (qty <= 0)
-                    status = {
-                      label: 'Rupture',
-                      cls: 'bg-error/10 text-error',
-                    };
-                  else if (qty < min)
-                    status = {
+                  const status = computeStatus(b);
+                  const statusMeta: Record<
+                    StockStatus,
+                    { label: string; cls: string }
+                  > = {
+                    available: {
+                      label: 'Disponible',
+                      cls: 'bg-secondary-container text-on-secondary-fixed-variant',
+                    },
+                    low: {
                       label: 'Critique',
                       cls: 'bg-tertiary-container text-on-tertiary-container',
-                    };
+                    },
+                    stockout: {
+                      label: 'Rupture',
+                      cls: 'bg-error/10 text-error',
+                    },
+                  };
+                  const meta = statusMeta[status];
                   return (
                     <tr key={b.id} className="hover:bg-surface-container-low">
                       <td className="px-6 py-3 text-sm font-medium text-primary">
-                        {item?.name ?? '—'}
+                        {b.item_name ?? '—'}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-600">
-                        {item?.sku ?? '—'}
+                        {b.item_sku ?? '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600">
+                        {b.item_category_name ?? '—'}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-600">
                         {b.zone_label || '(Zone principale)'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700 text-right">
                         {qty.toLocaleString('fr-FR')}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600">
+                        {b.item_unit_name ?? '—'}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-700 text-right font-medium">
                         {formatFcfa(value)}
@@ -576,10 +618,10 @@ function StockTab({
                         <span
                           className={cn(
                             'px-3 py-1 rounded-full text-[10px] font-bold',
-                            status.cls,
+                            meta.cls,
                           )}
                         >
-                          {status.label}
+                          {meta.label}
                         </span>
                       </td>
                     </tr>
@@ -588,11 +630,17 @@ function StockTab({
               </tbody>
               <tfoot>
                 <tr className="bg-surface-container-low/50 border-t border-slate-200">
-                  <td colSpan={3} className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <td
+                    colSpan={4}
+                    className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider"
+                  >
                     Total
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-500 text-right">
-                    {balances.length} ligne(s) — {totals.stockouts} rupture(s)
+                  <td
+                    colSpan={2}
+                    className="px-4 py-3 text-xs text-slate-500 text-right"
+                  >
+                    {filtered.length} ligne(s) — {totals.stockouts} rupture(s)
                   </td>
                   <td className="px-4 py-3 text-sm font-bold text-primary text-right">
                     {formatFcfa(totals.totalValue)}
@@ -731,16 +779,35 @@ function MovementsTab({ locationId }: { locationId: string }) {
   );
 }
 
+const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  brouillon: 'Brouillon',
+  planification: 'Planification',
+  en_cours: 'En cours',
+  suspendu: 'Suspendu',
+  termine: 'Terminé',
+  annule: 'Annulé',
+};
+
+const PROJECT_STATUS_BADGE: Record<ProjectStatus, string> = {
+  brouillon: 'bg-surface-container-high text-slate-600',
+  planification: 'bg-primary-fixed text-primary',
+  en_cours: 'bg-secondary-container text-on-secondary-fixed-variant',
+  suspendu: 'bg-tertiary-container text-on-tertiary-container',
+  termine: 'bg-surface-container-high text-slate-600',
+  annule: 'bg-error/10 text-error',
+};
+
+type ProjectRow = {
+  project_id: string;
+  project_name: string;
+  project_reference: string;
+  project_status: ProjectStatus | null;
+  out_count: number;
+  in_count: number;
+};
+
 function ProjectsTab({ locationId }: { locationId: string }) {
-  const [rows, setRows] = useState<
-    Array<{
-      project_id: string;
-      project_name: string;
-      project_reference: string;
-      out_count: number;
-      in_count: number;
-    }>
-  >([]);
+  const [rows, setRows] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -752,26 +819,22 @@ function ProjectsTab({ locationId }: { locationId: string }) {
       .list({ storage_location: locationId, page_size: 1000 })
       .then((data) => {
         if (cancelled) return;
-        const map = new Map<
-          string,
-          {
-            project_id: string;
-            project_name: string;
-            project_reference: string;
-            out_count: number;
-            in_count: number;
-          }
-        >();
+        const map = new Map<string, ProjectRow>();
         data.forEach((m) => {
           if (!m.project) return;
           const cur =
             map.get(m.project) ?? {
               project_id: m.project,
               project_name: m.project_name ?? '',
-              project_reference: '',
+              project_reference: m.project_reference ?? '',
+              project_status: m.project_status ?? null,
               out_count: 0,
               in_count: 0,
             };
+          if (!cur.project_reference && m.project_reference)
+            cur.project_reference = m.project_reference;
+          if (!cur.project_status && m.project_status)
+            cur.project_status = m.project_status;
           if (m.source_storage_location === locationId) cur.out_count += 1;
           if (m.destination_storage_location === locationId) cur.in_count += 1;
           map.set(m.project, cur);
@@ -805,11 +868,17 @@ function ProjectsTab({ locationId }: { locationId: string }) {
           Aucun chantier lié à ce lieu.
         </div>
       ) : (
-        <table className="w-full text-left border-collapse min-w-[600px]">
+        <table className="w-full text-left border-collapse min-w-[700px]">
           <thead>
             <tr className="bg-surface-container-high/50 border-b border-slate-100">
               <th className="px-6 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                Chantier
+                Référence
+              </th>
+              <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                Nom
+              </th>
+              <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                Statut
               </th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">
                 Entrées
@@ -825,8 +894,25 @@ function ProjectsTab({ locationId }: { locationId: string }) {
           <tbody className="divide-y divide-slate-50">
             {rows.map((r) => (
               <tr key={r.project_id} className="hover:bg-surface-container-low">
-                <td className="px-6 py-3 text-sm font-medium text-primary">
+                <td className="px-6 py-3 text-xs font-mono text-slate-700">
+                  {r.project_reference || '—'}
+                </td>
+                <td className="px-4 py-3 text-sm font-medium text-primary">
                   {r.project_name || '—'}
+                </td>
+                <td className="px-4 py-3">
+                  {r.project_status ? (
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider',
+                        PROJECT_STATUS_BADGE[r.project_status],
+                      )}
+                    >
+                      {PROJECT_STATUS_LABEL[r.project_status]}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-700 text-center">
                   {r.in_count}
