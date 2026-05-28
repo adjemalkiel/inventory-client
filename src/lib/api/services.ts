@@ -19,6 +19,7 @@ import type {
   Integration,
   Item,
   ItemDetailResponse,
+  ItemPriceHistory,
   ItemProjectAssignment,
   MeResponse,
   MeUpdatePayload,
@@ -27,9 +28,11 @@ import type {
   Permission,
   Project,
   ProjectBudgetLine,
+  ProjectCostBreakdown,
   ProjectPhase,
   ProjectResource,
   ProjectSummary,
+  StockValuationReport,
   Role,
   RolePermission,
   Site,
@@ -251,6 +254,10 @@ export const apiServices = {
   items: {
     ...itemsBase,
     detailBundle: (id: UUID) => unwrap(http.get<ItemDetailResponse>(`items/${id}/detail/`)),
+    priceHistory: (id: UUID) =>
+      unwrap(http.get<ItemPriceHistory>(`items/${id}/price-history/`)),
+    stockValuation: () =>
+      unwrap(http.get<StockValuationReport>('items/stock-valuation/')),
     uploadImage: async (id: UUID, file: File) => {
       const fd = new FormData();
       fd.append('image', file);
@@ -280,6 +287,8 @@ export const apiServices = {
     ...createCrudService<Project>('projects'),
     summary: (id: UUID) =>
       unwrap(http.get<ProjectSummary>(`projects/${id}/summary/`)),
+    costBreakdown: (id: UUID) =>
+      unwrap(http.get<ProjectCostBreakdown>(`projects/${id}/cost-breakdown/`)),
   },
   projectPhases: createCrudService<ProjectPhase>('project-phases'),
   projectBudgetLines: createCrudService<ProjectBudgetLine>('project-budget-lines'),

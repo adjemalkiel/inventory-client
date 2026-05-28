@@ -115,6 +115,14 @@ export default function SettingsPage() {
   });
   const [smtpPassword, setSmtpPassword] = useState('');
   const [smtpModalOpen, setSmtpModalOpen] = useState(false);
+  // Section 7 — Valorisation du stock
+  const [valuationMethod, setValuationMethod] =
+    useState<'last_price' | 'wac' | 'fifo'>('wac');
+  const [defaultCurrency, setDefaultCurrency] = useState('XOF');
+  const [vatRate, setVatRate] = useState('0');
+  const [valuationSaving, setValuationSaving] = useState(false);
+  const [valuationMsg, setValuationMsg] = useState<string | null>(null);
+  const [valuationErr, setValuationErr] = useState<string | null>(null);
   const smtpModalOpenRef = useRef(false);
 
   const openSmtpModal = () => {
@@ -240,6 +248,9 @@ export default function SettingsPage() {
           setDraft(orgToSmtpDraft(row));
           setSmtpPassword('');
         }
+        setValuationMethod(row.stock_valuation_method ?? 'wac');
+        setDefaultCurrency(row.default_currency ?? 'XOF');
+        setVatRate(String(row.vat_rate_percent ?? '0'));
       } else {
         setOrgId(null);
       }
@@ -284,6 +295,37 @@ export default function SettingsPage() {
   const connectedCount =
     integrations.filter((i) => i.is_connected).length +
     (draft.smtp_enabled && draft.smtp_host.trim() ? 1 : 0);
+
+  const saveValuation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgId) {
+      setValuationErr("Aucun enregistrement de paramètres ; contactez l'administrateur.");
+      return;
+    }
+    setValuationErr(null);
+    setValuationMsg(null);
+    setValuationSaving(true);
+    try {
+      const updated = await apiServices.organizationSettings.patch(orgId, {
+        stock_valuation_method: valuationMethod,
+        default_currency: defaultCurrency,
+        vat_rate_percent: vatRate,
+      } as Partial<OrganizationSettings>);
+      setOrg(updated);
+      setValuationMethod(updated.stock_valuation_method ?? 'wac');
+      setDefaultCurrency(updated.default_currency ?? 'XOF');
+      setVatRate(String(updated.vat_rate_percent ?? '0'));
+      setValuationMsg('Paramètres de valorisation enregistrés.');
+    } catch (err) {
+      const msg =
+        axios.isAxiosError(err) && err.response?.data?.detail
+          ? String(err.response.data.detail)
+          : "Impossible d'enregistrer les paramètres de valorisation.";
+      setValuationErr(msg);
+    } finally {
+      setValuationSaving(false);
+    }
+  };
 
   const saveSmtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -558,6 +600,106 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+          </section>
+
+          {/* Stock valuation (Section 7) */}
+          <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 border-l-4 border-primary">
+            <div className="flex items-center mb-6">
+              <div className="w-12 h-12 rounded-xl bg-primary-fixed flex items-center justify-center text-primary mr-4">
+                <Package className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-lg font-headline font-bold text-primary">Valorisation du stock</h4>
+                <p className="text-sm text-slate-500">
+                  Méthode utilisée pour figer le coût des sorties vers les chantiers.
+                </p>
+              </div>
+            </div>
+            <form className="space-y-4" onSubmit={saveValuation}>
+              {(
+                [
+                  { v: 'last_price' as const, t: "Dernier prix d'achat connu", d: "Simple — chaque sortie au dernier prix payé.", recommended: false },
+                  { v: 'wac' as const, t: 'Coût moyen pondéré (CUMP)', d: "Lisse les variations de prix. Standard comptable.", recommended: true },
+                  { v: 'fifo' as const, t: 'FIFO / PEPS', d: "Consomme les plus anciens lots d'abord. Traçabilité fine.", recommended: false },
+                ]
+              ).map((opt) => (
+                <label
+                  key={opt.v}
+                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all ${
+                    valuationMethod === opt.v
+                      ? 'border-primary bg-primary-fixed/40'
+                      : 'border-slate-100 hover:border-slate-200 bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="stock_valuation_method"
+                    className="mt-1 accent-primary"
+                    checked={valuationMethod === opt.v}
+                    onChange={() => setValuationMethod(opt.v)}
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-primary">{opt.t}</span>
+                      {opt.recommended ? (
+                        <span className="rounded-full bg-primary text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest">
+                          Recommandé
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">{opt.d}</p>
+                  </div>
+                </label>
+              ))}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                ⚠️ Le changement s'applique aux prochaines sorties. Les coûts déjà figés ne sont pas recalculés.
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <label className="font-label mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Devise par défaut
+                  </label>
+                  <select
+                    className="w-full h-12 rounded-xl border border-slate-100 bg-white px-4 font-bold text-primary shadow-sm"
+                    value={defaultCurrency}
+                    onChange={(e) => setDefaultCurrency(e.target.value)}
+                  >
+                    <option value="XOF">XOF (FCFA)</option>
+                    <option value="EUR">EUR</option>
+                    <option value="USD">USD</option>
+                    <option value="CNY">CNY</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="font-label mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Taux de TVA (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="w-full h-12 rounded-xl border border-slate-100 bg-white px-4 font-bold text-primary shadow-sm"
+                    value={vatRate}
+                    onChange={(e) => setVatRate(e.target.value)}
+                  />
+                </div>
+              </div>
+              {valuationMsg ? (
+                <p className="text-xs font-bold text-emerald-700">{valuationMsg}</p>
+              ) : null}
+              {valuationErr ? (
+                <p className="text-xs font-bold text-red-700">{valuationErr}</p>
+              ) : null}
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={valuationSaving}
+                  className="px-6 py-2.5 bg-primary text-white font-bold rounded-xl text-sm hover:bg-primary-container transition-all disabled:opacity-50"
+                >
+                  {valuationSaving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+              </div>
+            </form>
           </section>
 
           {/* Units and Locations */}

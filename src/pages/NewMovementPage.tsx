@@ -319,9 +319,12 @@ export default function NewMovementPage() {
           : null,
       project: formData.projectId ? formData.projectId : null,
       comment: formData.comment,
-      unit_price_at_movement: formData.unitPriceAtMovement.trim()
-        ? formData.unitPriceAtMovement.trim().replace(',', '.')
-        : null,
+      unit_price_at_movement:
+        formData.movementType === 'entree' || formData.movementType === 'retour'
+          ? formData.unitPriceAtMovement.trim()
+            ? formData.unitPriceAtMovement.trim().replace(',', '.')
+            : null
+          : null,
       loss_reason: formData.lossReason.trim()
         ? (formData.lossReason as StockMovementLossReason)
         : '',
@@ -594,19 +597,30 @@ export default function NewMovementPage() {
               <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
                 <div className="space-y-3">
                   <label className="font-label mb-4 ml-1 block text-[11px] font-bold uppercase tracking-widest text-slate-400">
-                    Prix unitaire (figé pour ce mouvement)
+                    {formData.movementType === 'entree'
+                      ? "Prix unitaire d'achat (figé pour ce mouvement)"
+                      : 'Prix unitaire'}
                   </label>
-                  <input
-                    className="h-16 w-full rounded-2xl border border-slate-100 bg-white px-6 font-bold text-primary shadow-sm"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={formData.unitPriceAtMovement}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, unitPriceAtMovement: e.target.value }))
-                    }
-                  />
+                  {formData.movementType === 'entree' || formData.movementType === 'retour' ? (
+                    <input
+                      className="h-16 w-full rounded-2xl border border-slate-100 bg-white px-6 font-bold text-primary shadow-sm"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={formData.unitPriceAtMovement}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, unitPriceAtMovement: e.target.value }))
+                      }
+                    />
+                  ) : (
+                    <div className="flex h-16 w-full items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-sm font-semibold text-slate-500">
+                      Coût calculé automatiquement à la validation
+                      <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                        méthode de valorisation
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-3">
                   <label className="font-label mb-4 ml-1 block text-[11px] font-bold uppercase tracking-widest text-slate-400">

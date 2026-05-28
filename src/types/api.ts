@@ -37,7 +37,9 @@ export type ProjectStatus =
 export type ProjectPriority = 'haute' | 'moyenne' | 'basse';
 export type ProjectCriticality = 'standard' | 'sensible' | 'critique';
 export type ProjectTrackingMode = 'progress' | 'hours';
-export type ProjectResourceKind = 'equipment' | 'subcontract';
+export type ProjectResourceKind = 'equipment' | 'subcontract' | 'main_oeuvre';
+export type ProjectResourceCostUnit = 'jour' | 'heure' | 'forfait' | '';
+export type StockValuationMethod = 'last_price' | 'wac' | 'fifo';
 export type ProjectPhaseStatus =
   | 'a_venir'
   | 'en_cours'
@@ -454,7 +456,10 @@ export interface ProjectSummary {
   cost_labour: string | null;
   cost_subcontracting: string | null;
   cost_rental: string | null;
+  cost_losses?: string | null;
+  cost_overhead?: string | null;
   cost_total: string | null;
+  margin?: string | null;
   margin_percent: number | null;
 }
 
@@ -465,6 +470,73 @@ export interface ProjectResource extends ApiAudit {
   availability_date: ISODate | null;
   headcount: number | null;
   status_label: string;
+  unit_cost: string | null;
+  cost_unit: ProjectResourceCostUnit;
+  planned_duration: number | null;
+  notes: string;
+  resource_kind_label?: string;
+  cost_unit_label?: string;
+  estimated_cost?: string | null;
+}
+
+/** `GET /projects/{id}/cost-breakdown/` (Section 7.3.6). */
+export interface ProjectCostBreakdown {
+  project_id: UUID;
+  currency: string;
+  cost_materials: string;
+  cost_losses: string;
+  cost_labour: string;
+  cost_subcontracting: string;
+  cost_rental: string;
+  cost_overhead: string;
+  cost_total: string;
+  budget_total: string;
+  budget_consumed_percent: number | null;
+  contract_value: string | null;
+  margin: string | null;
+  margin_percent: number | null;
+  by_category: ProjectBudgetVsActualRow[];
+}
+
+export interface ProjectBudgetVsActualRow {
+  category: ProjectBudgetCategory;
+  label: string;
+  budget: string;
+  actual: string;
+  variance: string;
+  variance_percent: number | null;
+  over_budget: boolean;
+  auto_actual: boolean;
+}
+
+/** `GET /items/{id}/price-history/` (Section 7.3.8). */
+export interface ItemPriceHistory {
+  item_id: UUID;
+  current_price: string | null;
+  weighted_average_cost: string;
+  min_price: string | null;
+  max_price: string | null;
+  points: Array<{
+    date: ISODate;
+    unit_price: string;
+    quantity: string;
+    reference: string;
+  }>;
+}
+
+/** `GET /items/stock-valuation/` (Section 7.3.9). */
+export interface StockValuationReport {
+  method: StockValuationMethod;
+  grand_total: string;
+  items: Array<{
+    item_id: UUID;
+    name: string;
+    sku: string;
+    category_name: string | null;
+    total_quantity: string;
+    unit_cost: string;
+    value: string;
+  }>;
 }
 
 export interface StockMovement extends ApiAudit {
@@ -552,6 +624,10 @@ export interface OrganizationSettings extends ApiAudit {
   smtp_has_password: boolean;
   /** Set only in PATCH/PUT; never read from the API. */
   smtp_password?: string;
+  /** Section 7 — méthode de valorisation des sorties. */
+  stock_valuation_method: StockValuationMethod;
+  default_currency: string;
+  vat_rate_percent: string;
 }
 
 export interface Integration extends ApiAudit {
