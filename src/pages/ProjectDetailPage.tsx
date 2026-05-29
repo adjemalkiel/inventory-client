@@ -12,13 +12,16 @@ import {
   HardHat,
   LayoutDashboard,
   MapPin,
+  Minus,
   Package,
   Pause,
   Pencil,
   Play,
   Plus,
+  Save,
   Trash2,
   Users,
+  X,
   XCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -148,6 +151,47 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Step 8 — Inline edit state
+  const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [editSaving, setEditSaving] = useState(false);
+
+  const handleStartEdit = (section: string, initial: Record<string, string>) => {
+    if (editingSection) setEditingSection(null);
+    setTimeout(() => {
+      setEditingSection(section);
+      setEditValues(initial);
+    }, 0);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingSection(null);
+    setEditValues({});
+  };
+
+  const handleSaveSection = async (section: string) => {
+    if (!project) return;
+    setEditSaving(true);
+    setActionError(null);
+    try {
+      const patchData: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(editValues)) {
+        if (v !== '') patchData[k] = v;
+      }
+      if (Object.keys(patchData).length === 0) {
+        setEditingSection(null);
+        return;
+      }
+      const updated = await apiServices.projects.patch(project.id, patchData);
+      setProject(updated);
+      setEditingSection(null);
+      setEditValues({});
+    } catch {
+      setActionError("Impossible d'enregistrer les modifications.");
+    }
+    setEditSaving(false);
+  };
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -436,59 +480,340 @@ export default function ProjectDetailPage() {
             />
           </div>
 
+          {actionError ? (
+            <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-2 text-xs text-error">
+              {actionError}
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-              <h3 className="font-headline font-bold text-primary mb-4">
-                Informations clés
-              </h3>
-              <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-6 text-sm">
-                <Info label="Référence" value={project.reference} />
-                <Info label="Type" value={project.project_type} />
-                <Info
-                  label="Client / Maître d'ouvrage"
-                  value={project.client_name || '—'}
-                />
-                <Info label="Agence" value={project.agency_name ?? '—'} />
-                <Info
-                  label="Priorité"
-                  value={project.priority}
-                />
-                <Info label="Criticité" value={project.criticality} />
-                <Info
-                  label="Valeur du marché"
-                  value={fmtMoney(project.contract_value, currency)}
-                />
-                <Info
-                  label="Surface"
-                  value={
-                    project.surface_m2
-                      ? `${Number(project.surface_m2).toLocaleString('fr-FR')} m²`
-                      : '—'
-                  }
-                />
-                <Info
-                  label="Mode de suivi"
-                  value={
-                    project.tracking_mode === 'progress'
-                      ? 'Avancement %'
-                      : 'Heures réelles'
-                  }
-                />
-                <Info
-                  label="Devise"
-                  value={project.currency}
-                />
-              </dl>
-              {project.description ? (
-                <div className="mt-6 pt-4 border-t border-slate-100">
-                  <p className="text-xs text-slate-400 uppercase tracking-widest font-bold mb-1">
-                    Description
-                  </p>
-                  <p className="text-sm text-slate-600 whitespace-pre-line">
-                    {project.description}
-                  </p>
-                </div>
-              ) : null}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Section 1 — Informations générales */}
+              <SectionCard
+                title="Informations générales"
+                editing={editingSection === 'general'}
+                onEdit={() =>
+                  handleStartEdit('general', {
+                    name: project.name,
+                    reference: project.reference,
+                    project_type: project.project_type,
+                    client_name: project.client_name || '',
+                    address: project.address || '',
+                    description: project.description || '',
+                  })
+                }
+                onSave={() => handleSaveSection('general')}
+                onCancel={handleCancelEdit}
+                saving={editSaving}
+                canEdit={canEdit}
+              >
+                {editingSection === 'general' ? (
+                  <InlineEditForm>
+                    <InlineField label="Nom">
+                      <input
+                        value={editValues.name || ''}
+                        onChange={(e) =>
+                          setEditValues({ ...editValues, name: e.target.value })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Référence">
+                      <input
+                        value={editValues.reference || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            reference: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Type">
+                      <select
+                        value={editValues.project_type || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            project_type: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="residentiel_collectif">
+                          Résidentiel Collectif
+                        </option>
+                        <option value="tertiaire">Tertiaire / Bureaux</option>
+                        <option value="infrastructure_publique">
+                          Infrastructure publique
+                        </option>
+                      </select>
+                    </InlineField>
+                    <InlineField label="Client">
+                      <input
+                        value={editValues.client_name || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            client_name: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Adresse">
+                      <input
+                        value={editValues.address || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            address: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Description" fullWidth>
+                      <textarea
+                        value={editValues.description || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            description: e.target.value,
+                          })
+                        }
+                        rows={3}
+                      />
+                    </InlineField>
+                  </InlineEditForm>
+                ) : (
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-6 text-sm">
+                    <Info label="Nom" value={project.name} />
+                    <Info label="Référence" value={project.reference} />
+                    <Info
+                      label="Type"
+                      value={
+                        project.project_type === 'residentiel_collectif'
+                          ? 'Résidentiel Collectif'
+                          : project.project_type === 'tertiaire'
+                            ? 'Tertiaire / Bureaux'
+                            : project.project_type === 'infrastructure_publique'
+                              ? 'Infrastructure publique'
+                              : project.project_type
+                      }
+                    />
+                    <Info
+                      label="Client"
+                      value={project.client_name || '—'}
+                    />
+                    <Info
+                      label="Adresse"
+                      value={project.address || '—'}
+                    />
+                    {project.description ? (
+                      <div className="md:col-span-2 mt-2 pt-3 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 uppercase tracking-widest font-bold mb-1">
+                          Description
+                        </p>
+                        <p className="text-sm text-slate-600 whitespace-pre-line">
+                          {project.description}
+                        </p>
+                      </div>
+                    ) : null}
+                  </dl>
+                )}
+              </SectionCard>
+
+              {/* Section 2 — Planning & Équipe */}
+              <SectionCard
+                title="Planning & Équipe"
+                editing={editingSection === 'planning'}
+                onEdit={() =>
+                  handleStartEdit('planning', {
+                    start_date: project.start_date || '',
+                    end_date: project.end_date || '',
+                    manager_name: project.manager_name || '',
+                    works_supervisor_name:
+                      project.works_supervisor_name || '',
+                    priority: project.priority || '',
+                    criticality: project.criticality || '',
+                  })
+                }
+                onSave={() => handleSaveSection('planning')}
+                onCancel={handleCancelEdit}
+                saving={editSaving}
+                canEdit={canEdit}
+              >
+                {editingSection === 'planning' ? (
+                  <InlineEditForm>
+                    <InlineField label="Date début">
+                      <input
+                        type="date"
+                        value={editValues.start_date || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            start_date: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Date fin">
+                      <input
+                        type="date"
+                        value={editValues.end_date || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            end_date: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Priorité">
+                      <select
+                        value={editValues.priority || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            priority: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="">—</option>
+                        <option value="haute">Haute</option>
+                        <option value="moyenne">Moyenne</option>
+                        <option value="basse">Basse</option>
+                      </select>
+                    </InlineField>
+                    <InlineField label="Criticité">
+                      <select
+                        value={editValues.criticality || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            criticality: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="">—</option>
+                        <option value="standard">Standard</option>
+                        <option value="sensible">Sensible</option>
+                        <option value="critique">Critique</option>
+                      </select>
+                    </InlineField>
+                  </InlineEditForm>
+                ) : (
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-6 text-sm">
+                    <Info
+                      label="Période"
+                      value={`${fmtDate(project.start_date)} → ${fmtDate(project.end_date)}`}
+                    />
+                    <Info
+                      label="Chef de chantier"
+                      value={project.manager_name ?? '—'}
+                    />
+                    <Info
+                      label="Conducteur"
+                      value={project.works_supervisor_name ?? '—'}
+                    />
+                    <Info label="Priorité" value={project.priority} />
+                    <Info label="Criticité" value={project.criticality} />
+                  </dl>
+                )}
+              </SectionCard>
+
+              {/* Section 3 — Budget & Contrat */}
+              <SectionCard
+                title="Budget & Contrat"
+                editing={editingSection === 'budget'}
+                onEdit={() =>
+                  handleStartEdit('budget', {
+                    budget_amount: project.budget_amount || '',
+                    contract_value: project.contract_value || '',
+                    surface_m2: project.surface_m2 || '',
+                    currency: project.currency || '',
+                  })
+                }
+                onSave={() => handleSaveSection('budget')}
+                onCancel={handleCancelEdit}
+                saving={editSaving}
+                canEdit={canEdit}
+              >
+                {editingSection === 'budget' ? (
+                  <InlineEditForm>
+                    <InlineField label="Budget global (FCFA)">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editValues.budget_amount || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            budget_amount: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Valeur du marché (FCFA)">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editValues.contract_value || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            contract_value: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Surface (m²)">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editValues.surface_m2 || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            surface_m2: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                    <InlineField label="Devise">
+                      <input
+                        value={editValues.currency || ''}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            currency: e.target.value,
+                          })
+                        }
+                      />
+                    </InlineField>
+                  </InlineEditForm>
+                ) : (
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-6 text-sm">
+                    <Info
+                      label="Budget global"
+                      value={fmtMoney(project.budget_amount, currency)}
+                    />
+                    <Info
+                      label="Valeur du marché"
+                      value={fmtMoney(project.contract_value, currency)}
+                    />
+                    <Info
+                      label="Surface"
+                      value={
+                        project.surface_m2
+                          ? `${Number(project.surface_m2).toLocaleString('fr-FR')} m²`
+                          : '—'
+                      }
+                    />
+                    <Info label="Devise" value={project.currency} />
+                  </dl>
+                )}
+              </SectionCard>
             </div>
 
             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-3">
@@ -563,12 +888,17 @@ export default function ProjectDetailPage() {
 
       {/* Onglet 5 — Ressources */}
       {activeTab === 'resources' ? (
-        <ResourcesTab resources={resources} />
+        <ResourcesTab
+          projectId={project.id}
+          resources={resources}
+          canEdit={canEdit}
+          onRefresh={refresh}
+        />
       ) : null}
 
       {/* Onglet 6 — Équipe */}
       {activeTab === 'team' ? (
-        <TeamTab project={project} />
+        <TeamTab project={project} canEdit={canEdit} onRefresh={refresh} />
       ) : null}
     </div>
   );
@@ -618,6 +948,132 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/* ── Inline Edit Helpers (Step 8) ── */
+
+function SectionCard({
+  title,
+  editing,
+  onEdit,
+  onSave,
+  onCancel,
+  saving,
+  canEdit,
+  children,
+}: {
+  title: string;
+  editing: boolean;
+  onEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+  canEdit: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-headline font-bold text-primary">{title}</h3>
+        {canEdit ? (
+          editing ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:opacity-90 disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Enregistrer
+              </button>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                <X className="w-3.5 h-3.5" />
+                Annuler
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-500 hover:text-primary hover:border-primary transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              Modifier
+            </button>
+          )
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function InlineEditForm({ children }: { children: React.ReactNode }) {
+  return <div className="space-y-3">{children}</div>;
+}
+
+function InlineField({
+  label,
+  children,
+  fullWidth,
+}: {
+  label: string;
+  children: React.ReactNode;
+  fullWidth?: boolean;
+}) {
+  return (
+    <div className={fullWidth ? 'md:col-span-2' : ''}>
+      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+/* ── Toast Helper ── */
+
+function Toast({
+  message,
+  onDismiss,
+  action,
+  actionLabel,
+}: {
+  message: string;
+  onDismiss: () => void;
+  action?: () => void;
+  actionLabel?: string;
+}) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 8000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+  return (
+    <div className="fixed bottom-6 right-6 z-50 bg-primary text-white px-5 py-3 rounded-xl shadow-xl text-sm font-semibold flex items-center gap-3 animate-slide-up">
+      <span>{message}</span>
+      {action ? (
+        <button
+          type="button"
+          onClick={action}
+          className="underline text-xs font-bold"
+        >
+          {actionLabel || 'OK'}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="ml-1 text-white/60 hover:text-white"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 function PhasesTab({
   projectId,
   phases,
@@ -629,9 +1085,87 @@ function PhasesTab({
   canEdit: boolean;
   onRefresh: () => Promise<void>;
 }) {
+  const { user } = useCurrentUser();
+  const canEditPhase =
+    canEdit || user?.role === 'chef_chantier';
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  // Modal state
+  const [editingPhase, setEditingPhase] = useState<ProjectPhase | null>(null);
+  const [modalValues, setModalValues] = useState<Record<string, string>>({});
+  const [modalSaving, setModalSaving] = useState(false);
+
+  const openModal = (phase: ProjectPhase) => {
+    setEditingPhase(phase);
+    setModalValues({
+      name: phase.name,
+      status: phase.status,
+      start_date: phase.start_date || '',
+      end_date: phase.end_date || '',
+      progress_percent: String(phase.progress_percent),
+      budget_amount: phase.budget_amount || '',
+      description: phase.description || '',
+    });
+  };
+
+  const closeModal = () => {
+    setEditingPhase(null);
+    setModalValues({});
+  };
+
+  const handleQuickProgress = async (phase: ProjectPhase, delta: number | 'max') => {
+    setError(null);
+    try {
+      let newPct: number;
+      let newStatus: string | undefined;
+      if (delta === 'max') {
+        newPct = 100;
+        newStatus = 'termine';
+      } else {
+        newPct = Math.max(0, Math.min(100, phase.progress_percent + delta));
+        if (newPct === 100) newStatus = 'termine';
+      }
+      await apiServices.projectPhases.patch(phase.id, {
+        progress_percent: newPct,
+        ...(newStatus ? { status: newStatus } : {}),
+      });
+      await onRefresh();
+    } catch {
+      setError("Impossible de mettre à jour l'avancement.");
+    }
+  };
+
+  const handleSaveModal = async () => {
+    if (!editingPhase) return;
+    setModalSaving(true);
+    setError(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(modalValues)) {
+        if (v === '') payload[k] = null;
+        else if (k === 'progress_percent') payload[k] = Number(v);
+        else payload[k] = v;
+      }
+      await apiServices.projectPhases.patch(editingPhase.id, payload);
+      closeModal();
+      await onRefresh();
+    } catch {
+      setError("Impossible d'enregistrer la phase.");
+    }
+    setModalSaving(false);
+  };
+
+  const handleDelete = async (phaseId: string) => {
+    if (!window.confirm('Supprimer cette phase ?')) return;
+    try {
+      await apiServices.projectPhases.remove(phaseId);
+      await onRefresh();
+    } catch {
+      setError('Suppression impossible.');
+    }
+  };
 
   const handleAdd = async () => {
     if (!name.trim()) return;
@@ -657,15 +1191,14 @@ function PhasesTab({
     setSaving(false);
   };
 
-  const handleDelete = async (phaseId: string) => {
-    if (!window.confirm('Supprimer cette phase ?')) return;
-    try {
-      await apiServices.projectPhases.remove(phaseId);
-      await onRefresh();
-    } catch {
-      setError('Suppression impossible.');
+  // Check if all phases complete for toast
+  useEffect(() => {
+    if (phases.length > 0 && phases.every((p) => p.status === 'termine')) {
+      setToast(
+        "Toutes les phases sont terminées. Passer le chantier à 'Terminé' ?",
+      );
     }
-  };
+  }, [phases]);
 
   return (
     <section className="space-y-4">
@@ -692,50 +1225,110 @@ function PhasesTab({
               const meta =
                 PHASE_STATUS_META[phase.status] ?? PHASE_STATUS_META.a_venir;
               return (
-                <li
-                  key={phase.id}
-                  className="p-5 flex items-center justify-between gap-4"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1.5">
-                      <span className="text-xs font-bold text-slate-400">
-                        #{phase.order}
-                      </span>
-                      <span className="font-semibold text-primary truncate">
-                        {phase.name}
-                      </span>
-                      <span
-                        className={cn(
-                          'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full',
-                          meta.pill,
-                        )}
+                <li key={phase.id} className="p-5">
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-1">
+                        <span className="text-xs font-bold text-slate-400">
+                          #{phase.order}
+                        </span>
+                        <span className="font-semibold text-primary truncate">
+                          {phase.name}
+                        </span>
+                        <span
+                          className={cn(
+                            'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full',
+                            meta.pill,
+                          )}
+                        >
+                          {meta.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-slate-500">
+                        <span>
+                          {fmtDate(phase.start_date)} → {fmtDate(phase.end_date)}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 bg-surface-container rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary rounded-full transition-all"
+                          style={{ width: `${phase.progress_percent}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Avancement : {phase.progress_percent}%
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {canEdit ? (
+                        <button
+                          onClick={() => handleDelete(phase.id)}
+                          className="p-1.5 text-slate-300 hover:text-error hover:bg-error/5 rounded-lg transition-all"
+                          title="Supprimer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : null}
+                      <button
+                        onClick={() => openModal(phase)}
+                        className="p-1.5 text-slate-300 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                        title="Détails"
                       >
-                        {meta.label}
-                      </span>
+                        <Pencil className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                      <span>
-                        {fmtDate(phase.start_date)} → {fmtDate(phase.end_date)}
-                      </span>
-                    </div>
-                    <div className="mt-2 h-1.5 bg-surface-container rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary"
-                        style={{ width: `${phase.progress_percent}%` }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Avancement : {phase.progress_percent}%
-                    </p>
                   </div>
-                  {canEdit ? (
-                    <button
-                      onClick={() => handleDelete(phase.id)}
-                      className="p-2 text-slate-300 hover:text-error hover:bg-error/5 rounded-lg transition-all"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+
+                  {/* Quick progress buttons */}
+                  {canEditPhase ? (
+                    <div className="flex items-center gap-1.5 ml-7">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickProgress(phase, -10)}
+                        className="px-2 py-1 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                      >
+                        -10
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickProgress(phase, -5)}
+                        className="px-2 py-1 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                      >
+                        -5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickProgress(phase, 5)}
+                        className="px-2 py-1 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                      >
+                        +5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickProgress(phase, 10)}
+                        className="px-2 py-1 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                      >
+                        +10
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickProgress(phase, 'max')}
+                        className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors"
+                      >
+                        <CheckCircle2 className="w-3 h-3 inline mr-0.5" />
+                        100%
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {phase.budget_amount ? (
+                    <p className="mt-2 ml-7 text-xs text-slate-500">
+                      Budget :{' '}
+                      {parseFloat(phase.budget_amount).toLocaleString(
+                        'fr-FR',
+                      )}{' '}
+                      FCFA
+                    </p>
                   ) : null}
                 </li>
               );
@@ -761,6 +1354,168 @@ function PhasesTab({
             Ajouter
           </button>
         </div>
+      ) : null}
+
+      {/* Edit Modal */}
+      {editingPhase ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={closeModal}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-headline font-bold text-primary">
+                Modifier la phase
+              </h3>
+              <button
+                onClick={closeModal}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <InlineEditForm>
+              <InlineField label="Nom">
+                <input
+                  value={modalValues.name || ''}
+                  onChange={(e) =>
+                    setModalValues({ ...modalValues, name: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </InlineField>
+              <InlineField label="Statut">
+                <select
+                  value={modalValues.status || ''}
+                  onChange={(e) => {
+                    const newVals = { ...modalValues, status: e.target.value };
+                    if (e.target.value === 'termine')
+                      newVals.progress_percent = '100';
+                    setModalValues(newVals);
+                  }}
+                >
+                  <option value="a_venir">À venir</option>
+                  <option value="en_cours">En cours</option>
+                  <option value="termine">Terminé</option>
+                  <option value="en_retard">En retard</option>
+                </select>
+              </InlineField>
+              <div className="grid grid-cols-2 gap-3">
+                <InlineField label="Date début">
+                  <input
+                    type="date"
+                    value={modalValues.start_date || ''}
+                    onChange={(e) =>
+                      setModalValues({
+                        ...modalValues,
+                        start_date: e.target.value,
+                      })
+                    }
+                  />
+                </InlineField>
+                <InlineField label="Date fin">
+                  <input
+                    type="date"
+                    value={modalValues.end_date || ''}
+                    onChange={(e) =>
+                      setModalValues({
+                        ...modalValues,
+                        end_date: e.target.value,
+                      })
+                    }
+                  />
+                </InlineField>
+              </div>
+              <InlineField label="Avancement (%)">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={modalValues.progress_percent || '0'}
+                    onChange={(e) => {
+                      const pct = Number(e.target.value);
+                      const newVals = {
+                        ...modalValues,
+                        progress_percent: String(pct),
+                      };
+                      if (pct === 100) newVals.status = 'termine';
+                      setModalValues(newVals);
+                    }}
+                    className="flex-1"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={modalValues.progress_percent || ''}
+                    onChange={(e) => {
+                      const pct = Number(e.target.value);
+                      const newVals = {
+                        ...modalValues,
+                        progress_percent: e.target.value,
+                      };
+                      if (pct === 100) newVals.status = 'termine';
+                      setModalValues(newVals);
+                    }}
+                    className="w-16 text-center text-sm"
+                  />
+                  <span className="text-xs font-bold text-primary">%</span>
+                </div>
+              </InlineField>
+              <InlineField label="Budget (FCFA)">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={modalValues.budget_amount || ''}
+                  onChange={(e) =>
+                    setModalValues({
+                      ...modalValues,
+                      budget_amount: e.target.value,
+                    })
+                  }
+                />
+              </InlineField>
+              <InlineField label="Description" fullWidth>
+                <textarea
+                  value={modalValues.description || ''}
+                  onChange={(e) =>
+                    setModalValues({
+                      ...modalValues,
+                      description: e.target.value,
+                    })
+                  }
+                  rows={3}
+                />
+              </InlineField>
+            </InlineEditForm>
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveModal}
+                disabled={modalSaving}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-primary hover:opacity-90 disabled:opacity-50"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {toast ? (
+        <Toast message={toast} onDismiss={() => setToast(null)} />
       ) : null}
     </section>
   );
@@ -1124,66 +1879,512 @@ function StockTab({
   );
 }
 
-function ResourcesTab({ resources }: { resources: ProjectResource[] }) {
+function ResourcesTab({
+  projectId,
+  resources,
+  canEdit,
+  onRefresh,
+}: {
+  projectId: string;
+  resources: ProjectResource[];
+  canEdit: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingResource, setEditingResource] =
+    useState<ProjectResource | null>(null);
+  const [drawerValues, setDrawerValues] = useState<Record<string, string>>({});
+  const [drawerSaving, setDrawerSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const openAdd = () => {
+    setEditingResource(null);
+    setDrawerValues({
+      resource_kind: 'equipment',
+      name: '',
+      availability_date: '',
+      headcount: '',
+      unit_cost: '',
+      cost_unit: 'jour',
+      planned_duration: '',
+      notes: '',
+    });
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (r: ProjectResource) => {
+    setEditingResource(r);
+    setDrawerValues({
+      resource_kind: r.resource_kind,
+      name: r.name,
+      availability_date: r.availability_date || '',
+      headcount: r.headcount !== null ? String(r.headcount) : '',
+      unit_cost: r.unit_cost || '',
+      cost_unit: r.cost_unit || 'jour',
+      planned_duration:
+        r.planned_duration !== null ? String(r.planned_duration) : '',
+      notes: r.notes || '',
+    });
+    setDrawerOpen(true);
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setEditingResource(null);
+    setDrawerValues({});
+    setError(null);
+  };
+
+  const estimatedCost = (() => {
+    const uc = parseFloat(drawerValues.unit_cost || '0');
+    const dur = parseInt(drawerValues.planned_duration || '0', 10);
+    if (!uc || isNaN(uc)) return 0;
+    if (drawerValues.cost_unit === 'forfait' || !dur) return uc;
+    return uc * dur;
+  })();
+
+  const handleSaveResource = async () => {
+    if (!drawerValues.name.trim()) return;
+    setDrawerSaving(true);
+    setError(null);
+    try {
+      const payload: Record<string, unknown> = {
+        project: projectId,
+        resource_kind: drawerValues.resource_kind,
+        name: drawerValues.name.trim(),
+        availability_date: drawerValues.availability_date || null,
+        headcount:
+          drawerValues.headcount !== ''
+            ? parseInt(drawerValues.headcount, 10)
+            : null,
+        unit_cost: drawerValues.unit_cost || null,
+        cost_unit: drawerValues.cost_unit || '',
+        planned_duration:
+          drawerValues.planned_duration !== ''
+            ? parseInt(drawerValues.planned_duration, 10)
+            : null,
+        notes: drawerValues.notes || '',
+      };
+      if (editingResource) {
+        await apiServices.projectResources.patch(
+          editingResource.id,
+          payload,
+        );
+      } else {
+        await apiServices.projectResources.create(payload as never);
+      }
+      closeDrawer();
+      await onRefresh();
+    } catch {
+      setError("Impossible d'enregistrer la ressource.");
+    }
+    setDrawerSaving(false);
+  };
+
+  const handleDelete = async (resId: string) => {
+    if (!window.confirm('Supprimer cette ressource ?')) return;
+    try {
+      await apiServices.projectResources.remove(resId);
+      await onRefresh();
+    } catch {
+      setError('Suppression impossible.');
+    }
+  };
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, ProjectResource[]>();
+    const order = ['equipment', 'subcontract', 'main_oeuvre'];
+    for (const r of resources) {
+      const list = m.get(r.resource_kind) ?? [];
+      list.push(r);
+      m.set(r.resource_kind, list);
+    }
+    return order.filter((k) => m.has(k)).map((k) => ({ key: k, items: m.get(k)! }));
+  }, [resources]);
+
+  const KIND_LABELS: Record<string, string> = {
+    equipment: 'Matériel / Équipement',
+    subcontract: 'Sous-traitance',
+    main_oeuvre: "Main d'œuvre",
+  };
+
+  const KIND_ICONS: Record<string, typeof Package> = {
+    equipment: Package,
+    subcontract: HardHat,
+    main_oeuvre: Users,
+  };
+
   return (
     <section className="space-y-4">
-      <h3 className="font-headline font-bold text-lg text-primary">
-        Ressources affectées
-      </h3>
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {resources.length === 0 ? (
-          <p className="p-6 text-sm text-slate-400 text-center">
-            Aucune ressource affectée.
-          </p>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {resources.map((r) => (
-              <li key={r.id} className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-primary/5">
-                    {r.resource_kind === 'subcontract' ? (
-                      <HardHat className="w-4 h-4 text-primary" />
-                    ) : (
-                      <Package className="w-4 h-4 text-primary" />
+      <div className="flex items-center justify-between">
+        <h3 className="font-headline font-bold text-lg text-primary">
+          Ressources affectées
+        </h3>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={openAdd}
+            className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-xl text-sm font-semibold"
+          >
+            <Plus className="w-4 h-4" />
+            Ajouter
+          </button>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-2 text-xs text-error">
+          {error}
+        </div>
+      ) : null}
+
+      {resources.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 text-center text-sm text-slate-400">
+          Aucune ressource affectée.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {grouped.map(({ key, items }) => {
+            const KindIcon = KIND_ICONS[key] ?? Package;
+            return (
+              <div key={key}>
+                <p className="text-xs font-bold uppercase tracking-widest text-primary mb-2">
+                  {KIND_LABELS[key]} ({items.length})
+                </p>
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <ul className="divide-y divide-slate-100">
+                    {items.map((r) => (
+                      <li
+                        key={r.id}
+                        className="p-4 flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="p-2 rounded-lg bg-primary/5 shrink-0">
+                            <KindIcon className="w-4 h-4 text-primary" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-primary text-sm truncate">
+                              {r.name}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {r.availability_date
+                                ? `Dispo: ${fmtDate(r.availability_date)}`
+                                : '—'}
+                              {r.headcount ? ` · ${r.headcount} pers.` : ''}
+                            </p>
+                            {r.estimated_cost ? (
+                              <p className="text-xs text-slate-500">
+                                Coût estimé :{' '}
+                                {parseFloat(r.estimated_cost).toLocaleString(
+                                  'fr-FR',
+                                )}{' '}
+                                FCFA
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                        {canEdit ? (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => openEdit(r)}
+                              className="p-1.5 text-slate-300 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                              title="Modifier"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(r.id)}
+                              className="p-1.5 text-slate-300 hover:text-error hover:bg-error/5 rounded-lg transition-all"
+                              title="Supprimer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Drawer */}
+      {drawerOpen ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end"
+          onClick={closeDrawer}
+        >
+          <div
+            className="bg-white w-full max-w-md h-full shadow-xl overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-headline font-bold text-primary">
+                  {editingResource
+                    ? 'Modifier une ressource'
+                    : 'Ajouter une ressource'}
+                </h3>
+                <button
+                  onClick={closeDrawer}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <InlineEditForm>
+                <InlineField label="Type de ressource">
+                  <div className="flex gap-1">
+                    {(['equipment', 'subcontract', 'main_oeuvre'] as const).map(
+                      (k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() =>
+                            setDrawerValues({
+                              ...drawerValues,
+                              resource_kind: k,
+                            })
+                          }
+                          className={cn(
+                            'flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold transition-colors',
+                            drawerValues.resource_kind === k
+                              ? 'bg-primary text-white'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+                          )}
+                        >
+                          {KIND_LABELS[k]}
+                        </button>
+                      ),
                     )}
                   </div>
-                  <div>
-                    <p className="font-semibold text-primary text-sm">
-                      {r.name}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {r.resource_kind === 'subcontract'
-                        ? 'Sous-traitance'
-                        : 'Matériel'}
-                      {r.status_label ? ` · ${r.status_label}` : ''}
-                    </p>
-                  </div>
+                </InlineField>
+
+                <InlineField label="Nom *">
+                  <input
+                    value={drawerValues.name || ''}
+                    onChange={(e) =>
+                      setDrawerValues({ ...drawerValues, name: e.target.value })
+                    }
+                    placeholder="Ex: Bétonnière B50"
+                  />
+                </InlineField>
+
+                <InlineField label="Date de disponibilité">
+                  <input
+                    type="date"
+                    value={drawerValues.availability_date || ''}
+                    onChange={(e) =>
+                      setDrawerValues({
+                        ...drawerValues,
+                        availability_date: e.target.value,
+                      })
+                    }
+                  />
+                </InlineField>
+
+                <InlineField label="Nombre (unités ou personnes)">
+                  <input
+                    type="number"
+                    min="0"
+                    value={drawerValues.headcount || ''}
+                    onChange={(e) =>
+                      setDrawerValues({
+                        ...drawerValues,
+                        headcount: e.target.value,
+                      })
+                    }
+                  />
+                </InlineField>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <InlineField label="Coût unitaire (FCFA)">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={drawerValues.unit_cost || ''}
+                      onChange={(e) =>
+                        setDrawerValues({
+                          ...drawerValues,
+                          unit_cost: e.target.value,
+                        })
+                      }
+                    />
+                  </InlineField>
+                  <InlineField label="Par">
+                    <select
+                      value={drawerValues.cost_unit || 'jour'}
+                      onChange={(e) =>
+                        setDrawerValues({
+                          ...drawerValues,
+                          cost_unit: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="jour">Jour</option>
+                      <option value="heure">Heure</option>
+                      <option value="forfait">Forfait</option>
+                    </select>
+                  </InlineField>
                 </div>
-                <div className="text-right text-xs">
-                  {r.availability_date ? (
-                    <p className="font-semibold text-primary">
-                      Dispo {fmtDate(r.availability_date)}
-                    </p>
-                  ) : null}
-                  {r.headcount ? (
-                    <p className="text-slate-500">{r.headcount} pers.</p>
-                  ) : null}
+
+                <InlineField label="Durée planifiée (jours)">
+                  <input
+                    type="number"
+                    min="0"
+                    value={drawerValues.planned_duration || ''}
+                    onChange={(e) =>
+                      setDrawerValues({
+                        ...drawerValues,
+                        planned_duration: e.target.value,
+                      })
+                    }
+                  />
+                </InlineField>
+
+                <div className="flex items-center gap-2 py-2 px-4 bg-slate-50 rounded-lg">
+                  <span className="text-xs text-slate-500">
+                    Coût estimé total
+                  </span>
+                  <span className="text-sm font-bold text-primary">
+                    {estimatedCost.toLocaleString('fr-FR')} FCFA
+                  </span>
                 </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+
+                <InlineField label="Notes" fullWidth>
+                  <textarea
+                    value={drawerValues.notes || ''}
+                    onChange={(e) =>
+                      setDrawerValues({
+                        ...drawerValues,
+                        notes: e.target.value,
+                      })
+                    }
+                    rows={3}
+                  />
+                </InlineField>
+              </InlineEditForm>
+
+              {error ? (
+                <div className="text-xs text-error">{error}</div>
+              ) : null}
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveResource}
+                  disabled={drawerSaving || !drawerValues.name.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-primary hover:opacity-90 disabled:opacity-50"
+                >
+                  Enregistrer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
 
-function TeamTab({ project }: { project: Project }) {
+function TeamTab({
+  project,
+  canEdit,
+  onRefresh,
+}: {
+  project: Project;
+  canEdit: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const isAdmin = useCurrentUser().user?.role === 'administrateur';
+  const [editing, setEditing] = useState(false);
+  const [users, setUsers] = useState<Array<{ id: number; full_name: string }>>(
+    [],
+  );
+  const [managerId, setManagerId] = useState(project.manager || '');
+  const [supervisorId, setSupervisorId] = useState(
+    project.works_supervisor || '',
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editing && users.length === 0) {
+      apiServices.userProfiles
+        .list({ ordering: 'user__last_name', page_size: 200 })
+        .then((data) => {
+          const list = Array.isArray(data) ? data : (data as { results: unknown[] }).results;
+          setUsers(
+            (list as Array<{
+              id: number;
+              full_name: string;
+            }>).map((u) => ({ id: u.id, full_name: u.full_name })),
+          );
+        })
+        .catch(() => setError('Impossible de charger les utilisateurs.'));
+    }
+  }, [editing, users.length]);
+
+  useEffect(() => {
+    setManagerId(project.manager || '');
+    setSupervisorId(project.works_supervisor || '');
+  }, [project.manager, project.works_supervisor]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await apiServices.projects.patch(project.id, {
+        manager: managerId || null,
+        works_supervisor: supervisorId || null,
+      });
+      setEditing(false);
+      await onRefresh();
+      // Update project reference
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _ = updated;
+    } catch {
+      setError("Impossible d'enregistrer l'équipe.");
+    }
+    setSaving(false);
+  };
+
   return (
     <section className="space-y-4">
-      <h3 className="font-headline font-bold text-lg text-primary">
-        Équipe du chantier
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="font-headline font-bold text-lg text-primary">
+          Équipe du chantier
+        </h3>
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-500 hover:text-primary hover:border-primary transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            Modifier l'équipe
+          </button>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="rounded-xl border border-error/20 bg-error-container/20 px-4 py-2 text-xs text-error">
+          {error}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-xs text-slate-400 uppercase tracking-widest font-bold mb-1">
@@ -1202,10 +2403,78 @@ function TeamTab({ project }: { project: Project }) {
           </p>
         </div>
       </div>
-      <p className="text-xs text-slate-400">
-        Pour modifier l'équipe ou les utilisateurs ayant accès à ce chantier,
-        rendez-vous dans la page Utilisateurs.
-      </p>
+
+      {editing ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setEditing(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-headline font-bold text-primary">
+                Modifier l'équipe
+              </h3>
+              <button
+                onClick={() => setEditing(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <InlineEditForm>
+              <InlineField label="Chef de chantier">
+                <select
+                  value={managerId || ''}
+                  onChange={(e) => setManagerId(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name}
+                    </option>
+                  ))}
+                </select>
+              </InlineField>
+              <InlineField label="Conducteur de travaux">
+                <select
+                  value={supervisorId || ''}
+                  onChange={(e) => setSupervisorId(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name}
+                    </option>
+                  ))}
+                </select>
+              </InlineField>
+            </InlineEditForm>
+            <p className="text-xs text-slate-400">
+              ⚠️ Les accès (scope) se gèrent depuis la page Utilisateurs.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-primary hover:opacity-90 disabled:opacity-50"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

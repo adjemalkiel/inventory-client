@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Eye,
+  Grid3X3,
+  LayoutList,
   Plus,
   Search,
   MapPin,
@@ -126,6 +129,25 @@ export default function ProjectsPage() {
   const [typeFilter, setTypeFilter] = useState<'' | ProjectType>('');
   const [priorityFilter, setPriorityFilter] = useState<'' | ProjectPriority>('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
+    try {
+      return (
+        (localStorage.getItem('projects_view_mode') as 'grid' | 'table') ||
+        'grid'
+      );
+    } catch {
+      return 'grid';
+    }
+  });
+
+  const handleViewModeChange = (mode: 'grid' | 'table') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('projects_view_mode', mode);
+    } catch {
+      // localStorage may be unavailable
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -365,14 +387,46 @@ export default function ProjectsPage() {
               ? 'Aucun chantier ne correspond aux critères.'
               : `Affichage ${pageFrom}–${pageTo} sur ${totalCount}`}
           </p>
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
-          >
-            <RefreshCw className="w-3 h-3" />
-            Réinitialiser
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+              <button
+                type="button"
+                onClick={() => handleViewModeChange('grid')}
+                className={cn(
+                  'px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all',
+                  viewMode === 'grid'
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-slate-400 hover:text-slate-600',
+                )}
+                title="Vue grille"
+              >
+                <Grid3X3 className="w-3.5 h-3.5" />
+                Grille
+              </button>
+              <button
+                type="button"
+                onClick={() => handleViewModeChange('table')}
+                className={cn(
+                  'px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all',
+                  viewMode === 'table'
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-slate-400 hover:text-slate-600',
+                )}
+                title="Vue tableau"
+              >
+                <LayoutList className="w-3.5 h-3.5" />
+                Tableau
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Réinitialiser
+            </button>
+          </div>
         </div>
       </div>
 
@@ -383,143 +437,264 @@ export default function ProjectsPage() {
         </div>
       ) : null}
 
-      {/* Grille de cartes */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {projects.map((project) => {
-          const meta = STATUS_META[project.status] ?? STATUS_META.brouillon;
-          const StatusIcon = meta.icon;
-          return (
-            <div
-              key={project.id}
-              className="bg-white rounded-2xl border border-surface-container-high shadow-sm overflow-hidden group hover:shadow-md transition-all duration-300"
-            >
-              <div className="p-6 space-y-6">
-                <div className="flex justify-between items-start gap-3">
-                  <div className="space-y-1 min-w-0">
-                    <h3 className="font-headline font-bold text-lg text-primary group-hover:text-primary-container transition-colors truncate">
-                      {project.name}
-                    </h3>
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-                      {project.reference}
-                    </p>
-                    {(project.address || project.city) && (
-                      <div className="flex items-center gap-1.5 text-slate-400">
-                        <MapPin className="w-3.5 h-3.5" />
-                        <span className="text-xs truncate">
-                          {[project.address, project.city]
-                            .filter(Boolean)
-                            .join(', ')}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <span
-                    className={cn(
-                      'px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0',
-                      meta.pill,
-                    )}
-                  >
-                    <StatusIcon className="w-3 h-3" />
-                    {meta.label}
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">Progression</span>
-                    <span className="text-primary">
-                      {project.progress_percent}%
+      {/* Vue Grille */}
+      {viewMode === 'grid' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {projects.map((project) => {
+            const meta = STATUS_META[project.status] ?? STATUS_META.brouillon;
+            const StatusIcon = meta.icon;
+            return (
+              <div
+                key={project.id}
+                className="bg-white rounded-2xl border border-surface-container-high shadow-sm overflow-hidden group hover:shadow-md transition-all duration-300"
+              >
+                <div className="p-6 space-y-6">
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="space-y-1 min-w-0">
+                      <h3 className="font-headline font-bold text-lg text-primary group-hover:text-primary-container transition-colors truncate">
+                        {project.name}
+                      </h3>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
+                        {project.reference}
+                      </p>
+                      {(project.address || project.city) && (
+                        <div className="flex items-center gap-1.5 text-slate-400">
+                          <MapPin className="w-3.5 h-3.5" />
+                          <span className="text-xs truncate">
+                            {[project.address, project.city]
+                              .filter(Boolean)
+                              .join(', ')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      className={cn(
+                        'px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0',
+                        meta.pill,
+                      )}
+                    >
+                      <StatusIcon className="w-3 h-3" />
+                      {meta.label}
                     </span>
                   </div>
-                  <div className="h-2 bg-surface-container rounded-full overflow-hidden">
-                    <div
-                      className="h-full architectural-gradient rounded-full"
-                      style={{ width: `${project.progress_percent}%` }}
-                    />
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4 py-4 border-y border-surface-dim/10">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Début
-                    </p>
-                    <div className="flex items-center gap-2 text-sm text-primary font-medium">
-                      <Calendar className="w-4 h-4 text-slate-400" />
-                      {formatDate(project.start_date)}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">Progression</span>
+                      <span className="text-primary">
+                        {project.progress_percent}%
+                      </span>
+                    </div>
+                    <div className="h-2 bg-surface-container rounded-full overflow-hidden">
+                      <div
+                        className="h-full architectural-gradient rounded-full"
+                        style={{ width: `${project.progress_percent}%` }}
+                      />
                     </div>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Budget
-                    </p>
-                    <div className="flex items-center gap-2 text-sm text-primary font-medium">
-                      <BarChart3 className="w-4 h-4 text-slate-400" />
-                      {formatBudget(project.budget_amount, project.currency)}
-                    </div>
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-[10px] font-bold text-primary border-2 border-white shadow-sm shrink-0">
-                      {initialsOf(project.manager_name)}
+                  <div className="grid grid-cols-2 gap-4 py-4 border-y border-surface-dim/10">
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Début
+                      </p>
+                      <div className="flex items-center gap-2 text-sm text-primary font-medium">
+                        <Calendar className="w-4 h-4 text-slate-400" />
+                        {formatDate(project.start_date)}
+                      </div>
                     </div>
-                    <div className="text-[10px] min-w-0">
-                      <p className="font-bold text-primary">Responsable</p>
-                      <p className="text-slate-500 truncate">
-                        {project.manager_name ?? '—'}
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Budget
+                      </p>
+                      <div className="flex items-center gap-2 text-sm text-primary font-medium">
+                        <BarChart3 className="w-4 h-4 text-slate-400" />
+                        {formatBudget(project.budget_amount, project.currency)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-[10px] font-bold text-primary border-2 border-white shadow-sm shrink-0">
+                        {initialsOf(project.manager_name)}
+                      </div>
+                      <div className="text-[10px] min-w-0">
+                        <p className="font-bold text-primary">Responsable</p>
+                        <p className="text-slate-500 truncate">
+                          {project.manager_name ?? '—'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right text-[10px]">
+                      <p className="font-bold text-slate-500">
+                        {project.movements_count ?? 0} mouvement
+                        {(project.movements_count ?? 0) > 1 ? 's' : ''}
+                      </p>
+                      <p className="text-slate-400">
+                        {project.phases_count ?? 0} phase
+                        {(project.phases_count ?? 0) > 1 ? 's' : ''}
                       </p>
                     </div>
                   </div>
-                  <div className="text-right text-[10px]">
-                    <p className="font-bold text-slate-500">
-                      {project.movements_count ?? 0} mouvement
-                      {(project.movements_count ?? 0) > 1 ? 's' : ''}
-                    </p>
-                    <p className="text-slate-400">
-                      {project.phases_count ?? 0} phase
-                      {(project.phases_count ?? 0) > 1 ? 's' : ''}
-                    </p>
-                  </div>
                 </div>
+
+                <Link
+                  to={`/projects/${project.id}`}
+                  className="w-full py-4 bg-surface-container-low/50 border-t border-surface-dim/10 text-xs font-bold text-primary hover:bg-primary hover:text-white transition-all flex items-center justify-center gap-2"
+                >
+                  <span>Voir les détails du chantier</span>
+                  <ChevronRight className="w-4 h-4" />
+                </Link>
               </div>
+            );
+          })}
 
-              <Link
-                to={`/projects/${project.id}`}
-                className="w-full py-4 bg-surface-container-low/50 border-t border-surface-dim/10 text-xs font-bold text-primary hover:bg-primary hover:text-white transition-all flex items-center justify-center gap-2"
-              >
-                <span>Voir les détails du chantier</span>
-                <ChevronRight className="w-4 h-4" />
-              </Link>
+          {!isLoading && projects.length === 0 ? (
+            <div className="lg:col-span-3 bg-surface-container-low/30 border-2 border-dashed border-surface-container-high rounded-2xl flex flex-col items-center justify-center p-12 gap-4 min-h-[280px]">
+              <Construction className="w-12 h-12 text-slate-300" />
+              <div className="text-center">
+                <p className="font-headline font-bold text-primary">
+                  Aucun chantier
+                </p>
+                <p className="text-xs text-slate-400 mt-1 max-w-md">
+                  Aucun chantier ne correspond à vos critères. Modifiez les
+                  filtres ou créez un nouveau chantier.
+                </p>
+              </div>
+              {canCreate ? (
+                <Link
+                  to="/projects/new"
+                  className="mt-2 inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md"
+                >
+                  <Plus className="w-4 h-4" />
+                  Créer un chantier
+                </Link>
+              ) : null}
             </div>
-          );
-        })}
+          ) : null}
+        </div>
+      ) : null}
 
-        {!isLoading && projects.length === 0 ? (
-          <div className="lg:col-span-3 bg-surface-container-low/30 border-2 border-dashed border-surface-container-high rounded-2xl flex flex-col items-center justify-center p-12 gap-4 min-h-[280px]">
-            <Construction className="w-12 h-12 text-slate-300" />
-            <div className="text-center">
-              <p className="font-headline font-bold text-primary">
-                Aucun chantier
-              </p>
-              <p className="text-xs text-slate-400 mt-1 max-w-md">
-                Aucun chantier ne correspond à vos critères. Modifiez les filtres
-                ou créez un nouveau chantier.
-              </p>
+      {/* Vue Tableau */}
+      {viewMode === 'table' ? (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          {projects.length === 0 && !isLoading ? (
+            <div className="flex flex-col items-center justify-center p-12 gap-4 min-h-[200px]">
+              <Construction className="w-12 h-12 text-slate-300" />
+              <div className="text-center">
+                <p className="font-headline font-bold text-primary">
+                  Aucun chantier
+                </p>
+                <p className="text-xs text-slate-400 mt-1 max-w-md">
+                  Aucun chantier ne correspond à vos critères.
+                </p>
+              </div>
+              {canCreate ? (
+                <Link
+                  to="/projects/new"
+                  className="mt-2 inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md"
+                >
+                  <Plus className="w-4 h-4" />
+                  Créer un chantier
+                </Link>
+              ) : null}
             </div>
-            {canCreate ? (
-              <Link
-                to="/projects/new"
-                className="mt-2 inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl font-semibold text-xs shadow-md"
-              >
-                <Plus className="w-4 h-4" />
-                Créer un chantier
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-surface-container-low/50 text-[10px] uppercase tracking-widest text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-bold">Référence</th>
+                    <th className="px-4 py-3 font-bold">Nom du chantier</th>
+                    <th className="px-4 py-3 font-bold">Type</th>
+                    <th className="px-4 py-3 font-bold">Statut</th>
+                    <th className="px-4 py-3 font-bold">Chef de chantier</th>
+                    <th className="px-4 py-3 font-bold">Dates</th>
+                    <th className="px-4 py-3 font-bold">Avancement</th>
+                    <th className="px-4 py-3 font-bold text-right">Budget</th>
+                    <th className="px-4 py-3 font-bold text-center">Phases</th>
+                    <th className="px-4 py-3 font-bold text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {projects.map((project) => {
+                    const meta =
+                      STATUS_META[project.status] ?? STATUS_META.brouillon;
+                    const StatusIcon = meta.icon;
+                    return (
+                      <tr
+                        key={project.id}
+                        className="hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">
+                          {project.reference}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-primary">
+                          {project.name}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {TYPE_LABELS[project.project_type] ??
+                            project.project_type}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider',
+                              meta.pill,
+                            )}
+                          >
+                            <StatusIcon className="w-3 h-3" />
+                            {meta.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {project.manager_name ?? '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-500">
+                          {formatDate(project.start_date)} →{' '}
+                          {formatDate(project.end_date)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 min-w-[100px]">
+                            <div className="flex-1 h-1.5 bg-surface-container rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full"
+                                style={{
+                                  width: `${project.progress_percent}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-xs font-bold text-primary w-8 text-right">
+                              {project.progress_percent}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-semibold text-primary">
+                          {formatBudget(project.budget_amount, project.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-center text-xs font-semibold text-slate-600">
+                          {project.phases_count ?? 0}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <Link
+                            to={`/projects/${project.id}`}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            Voir
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Pagination */}
       {totalPages > 1 ? (
