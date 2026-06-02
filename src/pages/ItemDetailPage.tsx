@@ -12,11 +12,13 @@ import {
   Building2,
   PlusCircle,
   Sparkles,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiServices } from '@/lib/api';
 import type {
   ItemDetailResponse,
+  ItemPriceHistory,
   StockMovement,
   StockMovementType,
 } from '@/types/api';
@@ -84,6 +86,7 @@ export default function ItemDetailPage() {
   const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [bundle, setBundle] = useState<ItemDetailResponse | null>(null);
+  const [priceHistory, setPriceHistory] = useState<ItemPriceHistory | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -92,13 +95,21 @@ export default function ItemDetailPage() {
     setDetailError(null);
 
     const load = async () => {
-      const [detailRes] = await Promise.allSettled([apiServices.items.detailBundle(id)]);
+      const [detailRes, historyRes] = await Promise.allSettled([
+        apiServices.items.detailBundle(id),
+        apiServices.items.priceHistory(id),
+      ]);
       if (!live) return;
       if (detailRes.status === 'fulfilled') {
         setBundle(detailRes.value);
       } else {
         setDetailError('Impossible de charger la fiche article.');
         setBundle(null);
+      }
+      if (historyRes.status === 'fulfilled') {
+        setPriceHistory(historyRes.value);
+      } else {
+        setPriceHistory(null);
       }
       setDetailLoading(false);
     };
@@ -413,6 +424,107 @@ export default function ItemDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Évolution du prix d'achat (GAP-02) */}
+          {priceHistory && !detailLoading ? (
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />
+                Évolution du prix d'achat
+              </h3>
+
+              {/* KPIs */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Dernier prix
+                  </p>
+                  <p className="text-sm font-bold text-primary">
+                    {priceHistory.current_price !== null
+                      ? `${Number(priceHistory.current_price).toLocaleString('fr-FR')} FCFA`
+                      : '—'}
+                  </p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Coût moyen pondéré
+                  </p>
+                  <p className="text-sm font-bold text-primary">
+                    {Number(priceHistory.weighted_average_cost).toLocaleString(
+                      'fr-FR',
+                    )}{' '}
+                    FCFA
+                  </p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Prix min
+                  </p>
+                  <p className="text-sm font-bold text-primary">
+                    {priceHistory.min_price !== null
+                      ? `${Number(priceHistory.min_price).toLocaleString('fr-FR')} FCFA`
+                      : '—'}
+                  </p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Prix max
+                  </p>
+                  <p className="text-sm font-bold text-primary">
+                    {priceHistory.max_price !== null
+                      ? `${Number(priceHistory.max_price).toLocaleString('fr-FR')} FCFA`
+                      : '—'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Tableau des réceptions */}
+              {priceHistory.points.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="py-2 px-3 text-[10px] font-bold uppercase text-slate-400">
+                          Date
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-bold uppercase text-slate-400 text-right">
+                          Prix unitaire
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-bold uppercase text-slate-400 text-right">
+                          Quantité
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-bold uppercase text-slate-400">
+                          N° de bon
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {priceHistory.points.slice(0, 10).map((pt, idx) => (
+                        <tr key={idx}>
+                          <td className="py-2 px-3 text-sm text-slate-600">
+                            {fmtDate(pt.date)}
+                          </td>
+                          <td className="py-2 px-3 text-sm font-semibold text-primary text-right">
+                            {Number(pt.unit_price).toLocaleString('fr-FR')} FCFA
+                          </td>
+                          <td className="py-2 px-3 text-sm text-slate-600 text-right">
+                            {fmtQty(Number(pt.quantity))}
+                          </td>
+                          <td className="py-2 px-3 text-sm text-slate-500 font-mono text-xs">
+                            {pt.reference}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500 py-4 text-center">
+                  Aucune réception enregistrée pour cet article.
+                </p>
+              )}
+            </div>
+          ) : null}
 
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-8 flex items-center gap-2">

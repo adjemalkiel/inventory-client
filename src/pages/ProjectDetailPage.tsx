@@ -20,6 +20,7 @@ import {
   Plus,
   Save,
   Trash2,
+  TrendingUp,
   Users,
   X,
   XCircle,
@@ -33,6 +34,7 @@ import type {
   Project,
   ProjectBudgetCategory,
   ProjectBudgetLine,
+  ProjectCostBreakdown,
   ProjectPhase,
   ProjectPhaseStatus,
   ProjectResource,
@@ -107,6 +109,7 @@ const TABS = [
   { id: 'overview', label: 'Vue d\'ensemble', icon: LayoutDashboard },
   { id: 'phases', label: 'Phases', icon: ClipboardCheck },
   { id: 'budget', label: 'Budget', icon: BarChart3 },
+  { id: 'couts', label: 'Coûts', icon: TrendingUp },
   { id: 'stock', label: 'Stock & Mouvements', icon: ArrowLeftRight },
   { id: 'resources', label: 'Ressources', icon: Package },
   { id: 'team', label: 'Équipe', icon: Users },
@@ -143,6 +146,7 @@ export default function ProjectDetailPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
+  const [costBreakdown, setCostBreakdown] = useState<ProjectCostBreakdown | null>(null);
   const [phases, setPhases] = useState<ProjectPhase[]>([]);
   const [budgetLines, setBudgetLines] = useState<ProjectBudgetLine[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -196,9 +200,10 @@ export default function ProjectDetailPage() {
   const refresh = useCallback(async () => {
     if (!id) return;
     try {
-      const [proj, sum, ph, bl, mvs, res, asg] = await Promise.all([
+      const [proj, sum, cb, ph, bl, mvs, res, asg] = await Promise.all([
         apiServices.projects.get(id),
         apiServices.projects.summary(id).catch(() => null),
+        apiServices.projects.costBreakdown(id).catch(() => null),
         apiServices.projectPhases.rawList({
           project: id,
           ordering: 'order',
@@ -221,6 +226,7 @@ export default function ProjectDetailPage() {
       ]);
       setProject(proj);
       setSummary(sum);
+      setCostBreakdown(cb);
       setPhases(isPaginatedResponse(ph) ? ph.results : ph);
       setBudgetLines(isPaginatedResponse(bl) ? bl.results : bl);
       setMovements(isPaginatedResponse(mvs) ? mvs.results : mvs);
@@ -487,6 +493,7 @@ export default function ProjectDetailPage() {
           ) : null}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-3 space-y-6">
             <div className="lg:col-span-2 space-y-6">
               {/* Section 1 — Informations générales */}
               <SectionCard
@@ -815,40 +822,6 @@ export default function ProjectDetailPage() {
                 )}
               </SectionCard>
             </div>
-
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-3">
-              <h3 className="font-headline font-bold text-primary mb-2">
-                Coûts complémentaires
-              </h3>
-              <p className="text-xs text-slate-400">
-                Données alimentées en Section 7 (Coûts &amp; Marges).
-              </p>
-              <Info
-                label="Main d'œuvre"
-                value={fmtMoney(summary?.cost_labour, currency)}
-              />
-              <Info
-                label="Sous-traitance"
-                value={fmtMoney(summary?.cost_subcontracting, currency)}
-              />
-              <Info
-                label="Location"
-                value={fmtMoney(summary?.cost_rental, currency)}
-              />
-              <Info
-                label="Coût total estimé"
-                value={fmtMoney(summary?.cost_total, currency)}
-              />
-              <Info
-                label="Marge"
-                value={
-                  summary?.margin_percent !== null &&
-                  summary?.margin_percent !== undefined
-                    ? `${summary.margin_percent}%`
-                    : '—'
-                }
-              />
-            </div>
           </div>
         </section>
       ) : null}
@@ -874,6 +847,11 @@ export default function ProjectDetailPage() {
           canEdit={canEdit}
           onRefresh={refresh}
         />
+      ) : null}
+
+      {/* Onglet Coûts */}
+      {activeTab === 'couts' ? (
+        <CoutsTab costBreakdown={costBreakdown} currency={currency} />
       ) : null}
 
       {/* Onglet 4 — Stock & mouvements */}
@@ -909,11 +887,13 @@ function KpiCard({
   value,
   icon: Icon,
   subValue,
+  valueClassName,
 }: {
   label: string;
   value: string;
   icon: React.ComponentType<{ className?: string }>;
   subValue?: string;
+  valueClassName?: string;
 }) {
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
@@ -925,7 +905,12 @@ function KpiCard({
           {label}
         </span>
       </div>
-      <p className="text-2xl font-headline font-extrabold text-primary">
+      <p
+        className={cn(
+          'text-2xl font-headline font-extrabold',
+          valueClassName || 'text-primary',
+        )}
+      >
         {value}
       </p>
       {subValue ? (
@@ -1771,6 +1756,239 @@ function BudgetTab({
           </div>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+/* ── Onglet Coûts (GAP-01) ── */
+
+function CoutsTab({
+  costBreakdown,
+  currency,
+}: {
+  costBreakdown: ProjectCostBreakdown | null;
+  currency: string;
+}) {
+  if (!costBreakdown) {
+    return (
+      <section className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm text-center text-sm text-slate-400">
+        Chargement des coûts…
+      </section>
+    );
+  }
+
+  const COST_ITEMS: Array<{ key: keyof ProjectCostBreakdown; label: string }> = [
+    { key: 'cost_materials', label: 'Matériaux' },
+    { key: 'cost_labour', label: "Main d'œuvre" },
+    { key: 'cost_subcontracting', label: 'Sous-traitance' },
+    { key: 'cost_rental', label: 'Location équipements' },
+    { key: 'cost_overhead', label: 'Frais généraux / logistique' },
+    { key: 'cost_losses', label: 'Pertes / casses' },
+  ];
+
+  const total = parseFloat(costBreakdown.cost_total || '0');
+  const budget = parseFloat(costBreakdown.budget_total || '0');
+  const margin = costBreakdown.margin !== null ? parseFloat(costBreakdown.margin) : null;
+  const marginPct = costBreakdown.margin_percent;
+  const progress = costBreakdown.budget_consumed_percent;
+
+  return (
+    <section className="space-y-6">
+      {/* A — Cartes de synthèse */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard
+          label="Coût total"
+          value={fmtMoney(costBreakdown.cost_total, currency)}
+          icon={BarChart3}
+          subValue={
+            progress !== null && progress !== undefined
+              ? `${progress}% budget`
+              : undefined
+          }
+        />
+        <KpiCard
+          label="Budget"
+          value={fmtMoney(costBreakdown.budget_total, currency)}
+          icon={CreditCard}
+        />
+        <KpiCard
+          label="Marge"
+          value={
+            costBreakdown.contract_value === null
+              ? '—'
+              : margin !== null
+                ? `${fmtMoney(costBreakdown.margin, currency)}`
+                : '—'
+          }
+          icon={TrendingUp}
+          subValue={
+            costBreakdown.contract_value === null
+              ? undefined
+              : marginPct !== null && marginPct !== undefined
+                ? `${marginPct}%`
+                : undefined
+          }
+          valueClassName={
+            costBreakdown.contract_value === null
+              ? ''
+              : marginPct !== null && marginPct !== undefined && marginPct >= 0
+                ? 'text-emerald-600'
+                : 'text-error'
+          }
+        />
+        <KpiCard
+          label="Avancement"
+          value={
+            progress !== null && progress !== undefined
+              ? `${progress} %`
+              : '—'
+          }
+          icon={ClipboardCheck}
+        />
+      </div>
+
+      {/* B — Répartition par poste */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <h3 className="font-headline font-bold text-primary mb-4">
+          Répartition par poste
+        </h3>
+        {total > 0 ? (
+          <div className="space-y-3">
+            {COST_ITEMS.map(({ key, label }) => {
+              const amount = parseFloat(
+                (costBreakdown[key] as string) || '0',
+              );
+              const pct = total > 0 ? (amount / total) * 100 : 0;
+              return (
+                <div key={key} className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-slate-600 w-40 shrink-0 truncate">
+                    {label}
+                  </span>
+                  <div className="flex-1 h-2 bg-surface-container rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all"
+                      style={{ width: `${Math.min(pct, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-bold text-primary w-28 text-right tabular-nums shrink-0">
+                    {amount.toLocaleString('fr-FR')} {currency}
+                  </span>
+                  <span className="text-[10px] text-slate-400 w-10 text-right shrink-0">
+                    {pct.toFixed(0)}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400 text-center py-4">
+            Aucun coût enregistré.
+          </p>
+        )}
+      </div>
+
+      {/* C — Tableau Budget vs Réalisé */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h3 className="font-headline font-bold text-primary">
+            Budget vs Réalisé
+          </h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-surface-container-low/50 text-[10px] uppercase tracking-widest text-slate-500">
+              <tr>
+                <th className="px-5 py-3 font-bold">Poste</th>
+                <th className="px-5 py-3 font-bold text-right">Budget</th>
+                <th className="px-5 py-3 font-bold text-right">Réalisé</th>
+                <th className="px-5 py-3 font-bold text-right">Écart</th>
+                <th className="px-5 py-3 font-bold text-right">%</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {costBreakdown.by_category.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-5 py-8 text-center text-slate-400"
+                  >
+                    Aucune ligne budgétaire.
+                  </td>
+                </tr>
+              ) : (
+                costBreakdown.by_category.map((row) => {
+                  const b = parseFloat(row.budget || '0');
+                  const a = parseFloat(row.actual || '0');
+                  const ecart = a - b;
+                  const hasEcart = row.variance !== null && row.variance !== '';
+                  return (
+                    <tr
+                      key={row.category}
+                      className={cn(
+                        'hover:bg-slate-50/50',
+                        row.over_budget
+                          ? 'bg-red-50/60'
+                          : '',
+                      )}
+                    >
+                      <td className="px-5 py-3">
+                        <span className="font-semibold text-primary">
+                          {row.label}
+                        </span>
+                        {row.over_budget ? (
+                          <span
+                            className="ml-2 text-error text-xs"
+                            title="Dépassement budget"
+                          >
+                            ⚠️
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-5 py-3 text-right font-semibold">
+                        {fmtMoney(row.budget, currency)}
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        {row.auto_actual ? (
+                          <span className="inline-flex items-center gap-1">
+                            {fmtMoney(row.actual, currency)}
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 uppercase">
+                              auto
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">
+                            {fmtMoney(row.actual, currency)}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={cn(
+                          'px-5 py-3 text-right font-semibold',
+                          !hasEcart
+                            ? 'text-slate-400'
+                            : ecart <= 0
+                              ? 'text-emerald-600'
+                              : 'text-error',
+                        )}
+                      >
+                        {!hasEcart
+                          ? '—'
+                          : fmtMoney(row.variance, currency)}
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs text-slate-500">
+                        {row.variance_percent !== null &&
+                        row.variance_percent !== undefined
+                          ? `${row.variance_percent}%`
+                          : '—'}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   );
 }

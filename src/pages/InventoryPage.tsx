@@ -13,13 +13,14 @@ import {
   Palette,
   HardHat,
   TrendingUp,
+  BarChart3,
   Bell,
   History,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { apiServices } from '@/lib/api';
-import type { Category, DashboardSummary, Item, StorageLocation, Supplier } from '@/types/api';
+import type { Category, DashboardSummary, Item, StorageLocation, StockValuationReport, Supplier } from '@/types/api';
 
 function TableSkeletonRows({ cols }: { cols: number }) {
   return (
@@ -117,6 +118,12 @@ export default function InventoryPage() {
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+
+  // Inventaire valorisé
+  const [valuationOpen, setValuationOpen] = useState(false);
+  const [valuation, setValuation] = useState<StockValuationReport | null>(null);
+  const [valuationLoading, setValuationLoading] = useState(false);
+  const [valuationError, setValuationError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
@@ -231,6 +238,30 @@ export default function InventoryPage() {
     });
   }, []);
 
+  const loadValuation = useCallback(async () => {
+    if (valuationOpen) {
+      setValuationOpen(false);
+      return;
+    }
+    setValuationOpen(true);
+    if (valuation) return; // déjà chargé
+    setValuationLoading(true);
+    setValuationError(null);
+    try {
+      const report = await apiServices.items.stockValuation();
+      setValuation(report);
+    } catch {
+      setValuationError("Impossible de charger l'inventaire valorisé.");
+    }
+    setValuationLoading(false);
+  }, [valuationOpen, valuation]);
+
+  const METHOD_LABELS: Record<string, string> = {
+    last_price: "Dernier prix d'achat connu",
+    wac: 'Coût moyen pondéré (CUMP)',
+    fifo: 'FIFO / PEPS (Premier entré, premier sorti)',
+  };
+
   return (
     <div className="space-y-10">
       <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
@@ -256,6 +287,19 @@ export default function InventoryPage() {
           >
             <Upload className="w-4 h-4 md:w-5 md:h-5" />
             <span>Importer</span>
+          </button>
+          <button
+            type="button"
+            onClick={loadValuation}
+            className={cn(
+              'flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 md:px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-400',
+              valuationOpen
+                ? 'bg-primary text-white shadow-md'
+                : 'text-primary bg-white border border-outline-variant/30 hover:bg-surface-container-low',
+            )}
+          >
+            <BarChart3 className="w-4 h-4 md:w-5 md:h-5" />
+            <span>Inventaire valorisé</span>
           </button>
           <Link
             to="/inventory/new"
@@ -523,6 +567,131 @@ export default function InventoryPage() {
           </div>
         </div>
       </div>
+
+      {/* Inventaire valorisé (GAP-03) */}
+      {valuationOpen ? (
+        <section className="space-y-4">
+          {valuationLoading ? (
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm text-center text-sm text-slate-400">
+              Chargement de l'inventaire valorisé…
+            </div>
+          ) : valuationError ? (
+            <div className="bg-white p-6 rounded-2xl border border-error/20 text-sm text-error">
+              {valuationError}
+            </div>
+          ) : valuation ? (
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              {/* En-tête */}
+              <div className="px-6 py-5 bg-primary/5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-headline font-bold text-primary text-lg">
+                    Inventaire valorisé
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Méthode active :{' '}
+                    <span className="font-semibold">
+                      {METHOD_LABELS[valuation.method] ?? valuation.method}
+                    </span>
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                    Valeur totale du stock
+                  </p>
+                  <p className="text-2xl font-headline font-extrabold text-primary">
+                    {Number(valuation.grand_total).toLocaleString('fr-FR')} XOF
+                  </p>
+                </div>
+              </div>
+
+              {/* Tableau */}
+              <div className="overflow-x-auto">
+                {valuation.items.length === 0 ? (
+                  <p className="p-8 text-center text-sm text-slate-400">
+                    Aucun stock valorisé.
+                  </p>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-surface-container-low/50 text-[10px] uppercase tracking-widest text-slate-500">
+                      <tr>
+                        <th className="px-5 py-3 font-bold">Article</th>
+                        <th className="px-5 py-3 font-bold">SKU</th>
+                        <th className="px-5 py-3 font-bold">Catégorie</th>
+                        <th className="px-5 py-3 font-bold text-right">
+                          Quantité
+                        </th>
+                        <th className="px-5 py-3 font-bold text-right">
+                          Coût unitaire
+                        </th>
+                        <th className="px-5 py-3 font-bold text-right">
+                          Valeur
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {valuation.items
+                        .slice()
+                        .sort(
+                          (a, b) =>
+                            parseFloat(b.value) - parseFloat(a.value),
+                        )
+                        .map((item) => (
+                          <tr
+                            key={item.item_id}
+                            className="hover:bg-slate-50/50"
+                          >
+                            <td className="px-5 py-3 font-semibold text-primary">
+                              <Link
+                                to={`/inventory/${item.item_id}`}
+                                className="hover:underline"
+                              >
+                                {item.name}
+                              </Link>
+                            </td>
+                            <td className="px-5 py-3 font-mono text-xs text-slate-500">
+                              {item.sku}
+                            </td>
+                            <td className="px-5 py-3 text-xs text-slate-600">
+                              {item.category_name ?? '—'}
+                            </td>
+                            <td className="px-5 py-3 text-right font-semibold">
+                              {fmtQty(item.total_quantity)}
+                            </td>
+                            <td className="px-5 py-3 text-right text-slate-500">
+                              {Number(item.unit_cost).toLocaleString(
+                                'fr-FR',
+                              )}{' '}
+                              FCFA
+                            </td>
+                            <td className="px-5 py-3 text-right font-bold text-primary">
+                              {Number(item.value).toLocaleString('fr-FR')} FCFA
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                    <tfoot className="bg-surface-container-low/50 font-bold">
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-5 py-3 text-sm uppercase tracking-widest text-primary"
+                        >
+                          Total
+                        </td>
+                        <td className="px-5 py-3 text-right text-primary">
+                          {Number(valuation.grand_total).toLocaleString(
+                            'fr-FR',
+                          )}{' '}
+                          FCFA
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
         {summaryLoading ? (
