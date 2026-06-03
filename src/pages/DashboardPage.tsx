@@ -561,6 +561,11 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
+  // Refresh silencieux des alertes au chargement du dashboard
+  useEffect(() => {
+    apiServices.alerts.refresh().catch(() => {/* silencieux */});
+  }, []);
+
   const kpis = useMemo(() => {
     if (!summary) return null;
     return [

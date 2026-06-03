@@ -1,65 +1,111 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Search, Bell, Menu, CheckCircle2, AlertTriangle, Info, Clock, X, User, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Search, Bell, Menu, CheckCircle2, AlertTriangle, Info, Clock, X, User, Settings as SettingsIcon, LogOut, Package, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import { userDisplayName, userInitials } from '@/lib/userDisplay';
+import { apiServices } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import type { Alert } from '@/types/api';
 
 interface TopNavProps {
   onMenuClick: () => void;
 }
 
-const notifications = [
-  {
-    id: 1,
-    title: 'Stock critique : Ciment CPJ 35',
-    description: 'Le stock est descendu en dessous du seuil d\'alerte (2 sacs restants).',
-    time: 'Il y a 10 min',
-    type: 'error',
-    icon: AlertTriangle,
-    color: 'text-error bg-error-container/10',
-    unread: true
-  },
-  {
-    id: 2,
-    title: 'Nouveau mouvement enregistré',
-    description: 'Transfert de 10 IPN 200 vers le chantier Horizon par Jean Dupont.',
-    time: 'Il y a 45 min',
-    type: 'success',
-    icon: CheckCircle2,
-    color: 'text-emerald-600 bg-emerald-50',
-    unread: true
-  },
-  {
-    id: 3,
-    title: 'Rappel : Inventaire physique',
-    description: 'L\'audit du dépôt Nord est prévu pour demain à 09:00.',
-    time: 'Il y a 2h',
-    type: 'info',
-    icon: Info,
-    color: 'text-primary bg-primary-fixed/20',
-    unread: false
-  }
-];
+const SEVERITY_COLORS: Record<string, { icon: React.ElementType; color: string; barColor: string }> = {
+  critical: { icon: AlertTriangle, color: 'text-error bg-error-container/10', barColor: 'bg-error' },
+  warning: { icon: AlertTriangle, color: 'text-orange-600 bg-orange-50', barColor: 'bg-orange-500' },
+  info: { icon: Package, color: 'text-primary bg-primary-fixed/20', barColor: 'bg-primary' },
+};
+
+function timeAgoText(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const sec = Math.floor((now - then) / 1000);
+  if (sec < 60) return "A l'instant";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `Il y a ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `Il y a ${h}h`;
+  const d = Math.floor(h / 24);
+  return `Il y a ${d}j`;
+}
 
 export function TopNav({ onMenuClick }: TopNavProps) {
   const { me, status, logout: logoutUser, hasPermission } = useCurrentUser();
   const canOpenSettings = hasPermission('settings.manage');
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [dropdownAlerts, setDropdownAlerts] = useState<Alert[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   const nameLine = me ? userDisplayName(me.user) : null;
   const subtitle = me
-    ? me.profile.job_title || me.profile.role_label || '—'
+    ? me.profile.job_title || me.profile.role_label || '\u2014'
     : status === 'loading' || status === 'idle'
-      ? 'Chargement…'
-      : '—';
+      ? 'Chargement\u2026'
+      : '\u2014';
   const emailLine = me?.user.email ?? '';
-  const avatarLetters = me ? userInitials(me.user) : '—';
+  const avatarLetters = me ? userInitials(me.user) : '\u2014';
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const { count } = await apiServices.alerts.unreadCount();
+      setUnreadCount(count);
+    } catch {
+      /* silencieux */
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchUnreadCount();
+    const interval = setInterval(() => void fetchUnreadCount(), 60_000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadCount]);
+
+  const openDropdown = async () => {
+    setIsNotificationsOpen(true);
+    setIsProfileOpen(false);
+    setLoadingAlerts(true);
+    try {
+      const res = await apiServices.alerts.list({
+        status: 'unread',
+        ordering: '-created_at',
+        page_size: '5',
+      });
+      const data = res as unknown as { results: Alert[] };
+      setDropdownAlerts(data.results ?? []);
+    } catch {
+      setDropdownAlerts([]);
+    } finally {
+      setLoadingAlerts(false);
+    }
+  };
+
+  const handleAlertClick = async (alert: Alert) => {
+    try {
+      await apiServices.alerts.markRead(alert.id);
+      setUnreadCount((c) => Math.max(0, c - 1));
+      setDropdownAlerts((prev) => prev.filter((a) => a.id !== alert.id));
+    } catch {
+      /* silencieux */
+    }
+    navigate('/alerts');
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await apiServices.alerts.markAllRead();
+      setUnreadCount(0);
+      setDropdownAlerts([]);
+    } catch {
+      /* silencieux */
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -73,6 +119,8 @@ export function TopNav({ onMenuClick }: TopNavProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const badgeDisplay = unreadCount > 99 ? '99+' : unreadCount > 0 ? String(unreadCount) : null;
 
   return (
     <header className="lg:ml-64 bg-surface sticky top-0 flex justify-between items-center px-4 md:px-10 py-4 z-40 transition-all duration-300">
@@ -98,8 +146,11 @@ export function TopNav({ onMenuClick }: TopNavProps) {
         <div className="relative" ref={notificationRef}>
           <button 
             onClick={() => {
-              setIsNotificationsOpen(!isNotificationsOpen);
-              setIsProfileOpen(false);
+              if (!isNotificationsOpen) {
+                void openDropdown();
+              } else {
+                setIsNotificationsOpen(false);
+              }
             }}
             className={cn(
               "relative p-2 text-on-surface hover:bg-surface-container-high rounded-full transition-all duration-300",
@@ -107,7 +158,11 @@ export function TopNav({ onMenuClick }: TopNavProps) {
             )}
           >
             <Bell className="w-5 h-5" />
-            <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full ring-2 ring-surface"></span>
+            {badgeDisplay && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 flex items-center justify-center bg-error text-white text-[10px] font-bold rounded-full ring-2 ring-surface">
+                {badgeDisplay}
+              </span>
+            )}
           </button>
 
           <AnimatePresence>
@@ -119,41 +174,76 @@ export function TopNav({ onMenuClick }: TopNavProps) {
                 className="absolute right-0 mt-4 w-80 md:w-96 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50"
               >
                 <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                  <h3 className="font-headline font-bold text-primary">Notifications</h3>
-                  <span className="px-2 py-0.5 bg-primary text-white text-[10px] font-bold rounded-full">2 nouvelles</span>
+                  <h3 className="font-headline font-bold text-primary">Alertes</h3>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <span className="px-2 py-0.5 bg-primary text-white text-[10px] font-bold rounded-full">
+                        {unreadCount} non {unreadCount > 1 ? 'lues' : 'lue'}
+                      </span>
+                    )}
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => void handleMarkAllRead()}
+                        className="text-[10px] font-bold text-primary hover:underline uppercase tracking-wider"
+                      >
+                        Tout lire
+                      </button>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
-                  {notifications.map((notification) => (
-                    <div 
-                      key={notification.id}
-                      className={cn(
-                        "p-4 hover:bg-slate-50 transition-colors cursor-pointer border-b border-slate-50 last:border-0 relative",
-                        notification.unread && "bg-primary/5"
-                      )}
-                    >
-                      {notification.unread && (
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
-                      )}
-                      <div className="flex gap-4">
-                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", notification.color)}>
-                          <notification.icon className="w-5 h-5" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-bold text-primary leading-tight mb-1">{notification.title}</p>
-                          <p className="text-xs text-slate-500 leading-relaxed mb-2">{notification.description}</p>
-                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            <Clock className="w-3 h-3" />
-                            {notification.time}
+                  {loadingAlerts ? (
+                    <div className="flex items-center justify-center py-8 text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                      <span className="text-sm">Chargement...</span>
+                    </div>
+                  ) : dropdownAlerts.length === 0 ? (
+                    <div className="py-8 text-center">
+                      <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm text-slate-500">Aucune alerte non lue</p>
+                    </div>
+                  ) : (
+                    dropdownAlerts.map((alert) => {
+                      const cfg = SEVERITY_COLORS[alert.severity] ?? SEVERITY_COLORS.info;
+                      return (
+                        <div 
+                          key={alert.id}
+                          onClick={() => void handleAlertClick(alert)}
+                          className="p-4 hover:bg-slate-50 transition-colors cursor-pointer border-b border-slate-50 last:border-0 relative"
+                        >
+                          <div className={cn('absolute left-0 top-0 bottom-0 w-1', cfg.barColor)} />
+                          <div className="flex gap-3 ml-1">
+                            <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', cfg.color)}>
+                              <cfg.icon className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-primary leading-tight mb-1 truncate">
+                                {alert.title}
+                              </p>
+                              <p className="text-xs text-slate-500 leading-relaxed line-clamp-2 mb-2">
+                                {alert.message}
+                              </p>
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                <Clock className="w-3 h-3" />
+                                {timeAgoText(alert.created_at)}
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })
+                  )}
                 </div>
 
-                <button className="w-full py-3 text-xs font-bold text-primary hover:bg-slate-50 transition-colors border-t border-slate-100 uppercase tracking-widest">
-                  Voir toutes les notifications
+                <button
+                  onClick={() => {
+                    navigate('/alerts');
+                    setIsNotificationsOpen(false);
+                  }}
+                  className="w-full py-3 text-xs font-bold text-primary hover:bg-slate-50 transition-colors border-t border-slate-100 uppercase tracking-widest"
+                >
+                  Voir toutes les alertes
                 </button>
               </motion.div>
             )}
@@ -172,7 +262,7 @@ export function TopNav({ onMenuClick }: TopNavProps) {
           >
             <div className="text-right hidden sm:block min-w-0 max-w-[200px]">
               <p className="text-sm font-semibold text-primary truncate" title={nameLine ?? undefined}>
-                {nameLine ?? (status === 'loading' ? '…' : 'Utilisateur')}
+                {nameLine ?? (status === 'loading' ? '\u2026' : 'Utilisateur')}
               </p>
               <p
                 className="text-[10px] text-on-surface-variant uppercase tracking-wider truncate"
@@ -197,7 +287,7 @@ export function TopNav({ onMenuClick }: TopNavProps) {
                 <div className="px-4 py-3 border-b border-slate-50 mb-1">
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Compte</p>
                   <p className="text-sm font-bold text-primary truncate" title={emailLine}>
-                    {emailLine || '—'}
+                    {emailLine || '\u2014'}
                   </p>
                 </div>
 
@@ -222,7 +312,7 @@ export function TopNav({ onMenuClick }: TopNavProps) {
                     className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm font-medium text-on-surface hover:bg-primary/5 rounded-xl transition-colors group"
                   >
                     <SettingsIcon className="w-4 h-4 text-slate-400 group-hover:text-primary transition-colors" />
-                    <span>Paramètres</span>
+                    <span>Parametres</span>
                   </button>
                 ) : null}
 
@@ -240,7 +330,7 @@ export function TopNav({ onMenuClick }: TopNavProps) {
                   className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm font-medium text-error hover:bg-error/5 rounded-xl transition-colors group"
                 >
                   <LogOut className="w-4 h-4 text-error/60 group-hover:text-error transition-colors" />
-                  <span>Déconnexion</span>
+                  <span>Deconnexion</span>
                 </button>
               </motion.div>
             )}

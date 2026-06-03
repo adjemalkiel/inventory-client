@@ -613,6 +613,13 @@ export interface OrganizationSettings extends ApiAudit {
   expiry_alerts_enabled: boolean;
   predictive_analysis_enabled: boolean;
   auto_reports_enabled: boolean;
+  email_alerts_enabled: boolean;
+  notification_email: string;
+  pending_approval_threshold_hours: number;
+  inventory_gap_min_cost: string;
+  inventory_gap_min_qty_percent: number;
+  abnormal_movement_threshold: string;
+  new_delivery_alerts_enabled: boolean;
   smtp_enabled: boolean;
   smtp_host: string;
   smtp_port: number;
@@ -667,6 +674,44 @@ export interface ActivityEvent {
   created_at: ISODateTime;
   updated_at: ISODateTime;
   updated_by: UserId | null;
+}
+
+export type AlertType =
+  | 'low_stock' | 'stockout' | 'budget_overrun'
+  | 'new_delivery' | 'pending_approval' | 'inventory_gap' | 'abnormal_movement';
+
+export type AlertSeverity = 'critical' | 'warning' | 'info';
+export type AlertStatus = 'unread' | 'read' | 'dismissed' | 'resolved';
+
+export interface Alert extends ApiAudit {
+  alert_type: AlertType;
+  alert_type_label: string;
+  severity: AlertSeverity;
+  severity_label: string;
+  status: AlertStatus;
+  status_label: string;
+  title: string;
+  message: string;
+  item: UUID | null;
+  item_name: string | null;
+  project: UUID | null;
+  project_name: string | null;
+  stock_movement: UUID | null;
+  email_sent: boolean;
+  email_sent_at: ISODateTime | null;
+  resolved_at: ISODateTime | null;
+}
+
+export interface AlertUnreadCount {
+  count: number;
+}
+
+export interface AlertRefreshResult {
+  stock_alerts_created: number;
+  stock_alerts_resolved: number;
+  budget_alerts_created: number;
+  budget_alerts_resolved: number;
+  pending_approval_alerts_created: number;
 }
 
 export type CreateInput<T> = Omit<

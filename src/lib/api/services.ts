@@ -5,6 +5,9 @@ import { getAccessToken } from '@/lib/auth';
 import type {
   ActivityEvent,
   Agency,
+  Alert,
+  AlertRefreshResult,
+  AlertUnreadCount,
   ApprovalRule,
   Category,
   DashboardRecentMovements,
@@ -331,6 +334,20 @@ export const apiServices = {
   rolePermissions: createCrudService<RolePermission>('role-permissions'),
   userRoles: createCrudService<UserRole>('user-roles'),
   activityEvents: createCrudService<ActivityEvent>('activity-events'),
+  alerts: {
+    list: (params?: Record<string, string>) =>
+      unwrap(http.get<PaginatedResponse<Alert>>('alerts/', { params })),
+    unreadCount: () =>
+      unwrap(http.get<AlertUnreadCount>('alerts/unread-count/')),
+    markRead: (id: UUID) =>
+      unwrap(http.post<Alert>(`alerts/${id}/read/`)),
+    dismiss: (id: UUID) =>
+      unwrap(http.post<Alert>(`alerts/${id}/dismiss/`)),
+    markAllRead: () =>
+      unwrap(http.post<{ updated: number }>('alerts/mark-all-read/')),
+    refresh: () =>
+      unwrap(http.post<AlertRefreshResult>('alerts/refresh/')),
+  },
   dashboard: {
     summary: (params?: { date_from?: string; date_to?: string }) =>
       unwrap(http.get<DashboardSummary>('dashboard/summary/', { params })),

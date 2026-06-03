@@ -123,6 +123,17 @@ export default function SettingsPage() {
   const [valuationSaving, setValuationSaving] = useState(false);
   const [valuationMsg, setValuationMsg] = useState<string | null>(null);
   const [valuationErr, setValuationErr] = useState<string | null>(null);
+  // Alertes -- seuils configurables
+  const [alertEmailEnabled, setAlertEmailEnabled] = useState(true);
+  const [alertNotificationEmail, setAlertNotificationEmail] = useState('');
+  const [alertLowStockPercent, setAlertLowStockPercent] = useState(15);
+  const [alertNewDeliveryEnabled, setAlertNewDeliveryEnabled] = useState(true);
+  const [alertPendingHours, setAlertPendingHours] = useState(24);
+  const [alertInventoryGapCost, setAlertInventoryGapCost] = useState('50000');
+  const [alertAbnormalThreshold, setAlertAbnormalThreshold] = useState('500000');
+  const [alertSaving, setAlertSaving] = useState(false);
+  const [alertSettingsMsg, setAlertSettingsMsg] = useState<string | null>(null);
+  const [alertSettingsErr, setAlertSettingsErr] = useState<string | null>(null);
   const smtpModalOpenRef = useRef(false);
 
   const openSmtpModal = () => {
@@ -251,6 +262,13 @@ export default function SettingsPage() {
         setValuationMethod(row.stock_valuation_method ?? 'wac');
         setDefaultCurrency(row.default_currency ?? 'XOF');
         setVatRate(String(row.vat_rate_percent ?? '0'));
+        setAlertEmailEnabled(row.email_alerts_enabled ?? true);
+        setAlertNotificationEmail(row.notification_email ?? '');
+        setAlertLowStockPercent(row.global_low_stock_threshold_percent ?? 15);
+        setAlertNewDeliveryEnabled(row.new_delivery_alerts_enabled ?? true);
+        setAlertPendingHours(row.pending_approval_threshold_hours ?? 24);
+        setAlertInventoryGapCost(row.inventory_gap_min_cost ?? '50000');
+        setAlertAbnormalThreshold(row.abnormal_movement_threshold ?? '500000');
       } else {
         setOrgId(null);
       }
@@ -324,6 +342,38 @@ export default function SettingsPage() {
       setValuationErr(msg);
     } finally {
       setValuationSaving(false);
+    }
+  };
+
+  const saveAlertSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgId) {
+      setAlertSettingsErr("Aucun enregistrement de parametres ; contactez l'administrateur.");
+      return;
+    }
+    setAlertSettingsErr(null);
+    setAlertSettingsMsg(null);
+    setAlertSaving(true);
+    try {
+      const updated = await apiServices.organizationSettings.patch(orgId, {
+        email_alerts_enabled: alertEmailEnabled,
+        notification_email: alertNotificationEmail,
+        global_low_stock_threshold_percent: alertLowStockPercent,
+        new_delivery_alerts_enabled: alertNewDeliveryEnabled,
+        pending_approval_threshold_hours: alertPendingHours,
+        inventory_gap_min_cost: alertInventoryGapCost,
+        abnormal_movement_threshold: alertAbnormalThreshold,
+      } as Partial<OrganizationSettings>);
+      setOrg(updated);
+      setAlertSettingsMsg('Parametres d\'alerte enregistres.');
+    } catch (err) {
+      const msg =
+        axios.isAxiosError(err) && err.response?.data?.detail
+          ? String(err.response.data.detail)
+          : "Impossible d'enregistrer les parametres d'alerte.";
+      setAlertSettingsErr(msg);
+    } finally {
+      setAlertSaving(false);
     }
   };
 
@@ -571,35 +621,150 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h4 className="text-lg font-headline font-bold text-primary">Seuils d'alerte</h4>
-                <p className="text-sm text-slate-500">Configurez les notifications de stock critique.</p>
+                <p className="text-sm text-slate-500">Configurez les notifications et les seuils de declenchement.</p>
               </div>
             </div>
-            <div className="space-y-4">
+            <form className="space-y-4" onSubmit={saveAlertSettings}>
+              {/* Email alerts */}
+              <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
+                <div className="flex flex-col">
+                  <span className="font-bold text-sm text-primary">Email pour alertes critiques</span>
+                  <span className="text-xs text-slate-500">Envoi automatique pour les alertes de severite critique</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setAlertEmailEnabled(!alertEmailEnabled)}
+                    className={cn(
+                      'w-10 h-6 rounded-full relative flex items-center px-1 transition-colors',
+                      alertEmailEnabled ? 'bg-primary' : 'bg-slate-200',
+                    )}
+                  >
+                    <div className={cn('w-4 h-4 bg-white rounded-full shadow-sm transition-transform', alertEmailEnabled && 'translate-x-4')} />
+                  </button>
+                </div>
+              </div>
+              {/* Notification email */}
+              <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
+                <div className="flex flex-col flex-1 mr-4">
+                  <span className="font-bold text-sm text-primary">Email destinataire</span>
+                  <span className="text-xs text-slate-500">Adresse de reception des alertes critiques</span>
+                </div>
+                <input
+                  type="email"
+                  value={alertNotificationEmail}
+                  onChange={(e) => setAlertNotificationEmail(e.target.value)}
+                  placeholder="admin@exemple.com"
+                  className="w-64 px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-primary font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-colors"
+                />
+              </div>
+              {/* Low stock threshold */}
               <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="flex flex-col">
                   <span className="font-bold text-sm text-primary">Alerte de Stock Bas Global</span>
-                  <span className="text-xs text-slate-500">Notifie l'administrateur quand le stock atteint 15%</span>
+                  <span className="text-xs text-slate-500">Notifie quand le stock atteint ce pourcentage du seuil minimum</span>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-sm font-bold text-primary">15%</span>
-                  <button className="w-10 h-6 bg-primary rounded-full relative flex items-center px-1">
-                    <div className="w-4 h-4 bg-white rounded-full ml-auto shadow-sm"></div>
-                  </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={alertLowStockPercent}
+                    onChange={(e) => setAlertLowStockPercent(Math.max(1, Math.min(100, Number(e.target.value) || 15)))}
+                    className="w-16 px-2 py-1.5 rounded-lg border border-slate-200 text-sm text-primary font-bold text-center focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-colors"
+                  />
+                  <span className="text-sm font-bold text-primary">%</span>
                 </div>
               </div>
+              {/* New delivery alerts */}
               <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="flex flex-col">
-                  <span className="font-bold text-sm text-primary">Péremption Matériaux</span>
-                  <span className="text-xs text-slate-500">Alerte 30 jours avant la date limite</span>
+                  <span className="font-bold text-sm text-primary">Alertes nouvelles livraisons</span>
+                  <span className="text-xs text-slate-500">Generer une alerte info a chaque reception de livraison</span>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-bold text-primary">30j</span>
-                  <button className="w-10 h-6 bg-slate-200 rounded-full relative flex items-center px-1">
-                    <div className="w-4 h-4 bg-white rounded-full shadow-sm"></div>
+                  <button
+                    type="button"
+                    onClick={() => setAlertNewDeliveryEnabled(!alertNewDeliveryEnabled)}
+                    className={cn(
+                      'w-10 h-6 rounded-full relative flex items-center px-1 transition-colors',
+                      alertNewDeliveryEnabled ? 'bg-primary' : 'bg-slate-200',
+                    )}
+                  >
+                    <div className={cn('w-4 h-4 bg-white rounded-full shadow-sm transition-transform', alertNewDeliveryEnabled && 'translate-x-4')} />
                   </button>
                 </div>
               </div>
-            </div>
+              {/* Pending approval threshold */}
+              <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
+                <div className="flex flex-col">
+                  <span className="font-bold text-sm text-primary">Delai validation en attente</span>
+                  <span className="text-xs text-slate-500">Declenche une alerte si un mouvement reste en attente au-dela de ce delai</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={alertPendingHours}
+                    onChange={(e) => setAlertPendingHours(Math.max(1, Number(e.target.value) || 24))}
+                    className="w-16 px-2 py-1.5 rounded-lg border border-slate-200 text-sm text-primary font-bold text-center focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-colors"
+                  />
+                  <span className="text-sm font-bold text-primary">heures</span>
+                </div>
+              </div>
+              {/* Inventory gap min cost */}
+              <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
+                <div className="flex flex-col">
+                  <span className="font-bold text-sm text-primary">Seuil ecart inventaire (cout)</span>
+                  <span className="text-xs text-slate-500">Valeur minimale d'un ajustement perte pour declencher une alerte</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={alertInventoryGapCost}
+                    onChange={(e) => setAlertInventoryGapCost(e.target.value)}
+                    className="w-24 px-2 py-1.5 rounded-lg border border-slate-200 text-sm text-primary font-bold text-center focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-colors"
+                  />
+                  <span className="text-sm font-bold text-primary">XOF</span>
+                </div>
+              </div>
+              {/* Abnormal movement threshold */}
+              <div className="flex items-center justify-between p-5 bg-slate-50 rounded-xl border border-slate-100">
+                <div className="flex flex-col">
+                  <span className="font-bold text-sm text-primary">Seuil mouvement eleve</span>
+                  <span className="text-xs text-slate-500">Valeur minimale d'une sortie pour declencher une alerte</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={alertAbnormalThreshold}
+                    onChange={(e) => setAlertAbnormalThreshold(e.target.value)}
+                    className="w-24 px-2 py-1.5 rounded-lg border border-slate-200 text-sm text-primary font-bold text-center focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-colors"
+                  />
+                  <span className="text-sm font-bold text-primary">XOF</span>
+                </div>
+              </div>
+              {/* Save button */}
+              <div className="flex items-center gap-4 pt-2">
+                <button
+                  type="submit"
+                  disabled={alertSaving}
+                  className="px-6 py-2.5 bg-primary text-white font-semibold text-sm rounded-xl shadow-lg hover:bg-primary-container transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {alertSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Enregistrer
+                </button>
+                {alertSettingsMsg && (
+                  <span className="text-sm font-medium text-emerald-600">{alertSettingsMsg}</span>
+                )}
+                {alertSettingsErr && (
+                  <span className="text-sm font-medium text-error">{alertSettingsErr}</span>
+                )}
+              </div>
+            </form>
           </section>
 
           {/* Stock valuation (Section 7) */}
