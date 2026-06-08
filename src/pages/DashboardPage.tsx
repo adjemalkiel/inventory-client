@@ -3,6 +3,7 @@ import {
   TrendingUp,
   AlertTriangle,
   ArrowLeftRight,
+  BarChart3,
   Building2,
   Warehouse,
   Sparkles,
@@ -477,6 +478,10 @@ export default function DashboardPage() {
   const [loadingMv, setLoadingMv] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [costOverview, setCostOverview] = useState<Awaited<
+    ReturnType<typeof apiServices.dashboard.costOverview>
+  > | null>(null);
+
   const [chartMode, setChartMode] = useState<'count' | 'value'>('count');
 
   const [calendarDayStamp, setCalendarDayStamp] = useState(() => formatLocalISODate(new Date()));
@@ -556,6 +561,10 @@ export default function DashboardPage() {
     setLoadingDist(false);
     setLoadingMv(false);
   }, [periodParams]);
+
+  useEffect(() => {
+    apiServices.dashboard.costOverview().then(setCostOverview).catch(() => null);
+  }, []);
 
   useEffect(() => {
     load();
@@ -662,15 +671,13 @@ export default function DashboardPage() {
             onCustomFromChange={onCustomFromChange}
             onCustomToChange={onCustomToChange}
           />
-          <button
-            type="button"
-            className="bg-primary text-white px-6 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary-container transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg shadow-primary/10 active:scale-[0.98] opacity-70"
-            title="Export à brancher (hors périmètre Section 2)"
-            disabled
+          <Link
+            to="/reports"
+            className="bg-primary text-white px-6 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary-container transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg shadow-primary/10 active:scale-[0.98]"
           >
             <ArrowLeftRight className="w-4 h-4" />
-            <span>Exporter le rapport</span>
-          </button>
+            <span>Rapports</span>
+          </Link>
         </div>
       </div>
 
@@ -899,6 +906,59 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {costOverview && (
+        <div className="bg-white p-6 rounded-2xl border border-surface-container-high shadow-sm">
+          <h3 className="font-headline font-bold text-lg mb-4 text-primary">Vue d&apos;ensemble des coûts</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="p-3 rounded-xl bg-surface-container-low">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.1em] mb-1">Projets actifs</p>
+              <p className="text-lg font-semibold text-on-surface">{costOverview.active_projects_count}</p>
+              <p className="text-[9px] text-on-surface-variant mt-0.5">planifiés + en cours</p>
+            </div>
+            <div className="p-3 rounded-xl bg-surface-container-low">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.1em] mb-1">Budget total</p>
+              <p className="text-lg font-semibold text-on-surface">{new Intl.NumberFormat('fr-FR').format(parseFloat(costOverview.total_budget))} XAF</p>
+            </div>
+            <div className="p-3 rounded-xl bg-surface-container-low">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.1em] mb-1">Coût total</p>
+              <p className="text-lg font-semibold text-on-surface">{new Intl.NumberFormat('fr-FR').format(parseFloat(costOverview.total_cost))} XAF</p>
+            </div>
+            <div className="p-3 rounded-xl bg-surface-container-low">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.1em] mb-1">Valeur marché</p>
+              <p className="text-lg font-semibold text-on-surface">
+                {costOverview.total_contract_value
+                  ? new Intl.NumberFormat('fr-FR').format(parseFloat(costOverview.total_contract_value)) + ' XAF'
+                  : '—'}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-surface-container-low">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.1em] mb-1">Marge globale</p>
+              <p className="text-lg font-semibold text-on-surface">
+                {costOverview.global_margin
+                  ? new Intl.NumberFormat('fr-FR').format(parseFloat(costOverview.global_margin)) + ' XAF'
+                  : '—'}
+              </p>
+              {costOverview.global_margin_percent !== null && (
+                <p className="text-[9px] text-on-surface-variant mt-0.5">{costOverview.global_margin_percent}%</p>
+              )}
+            </div>
+            <div className="p-3 rounded-xl bg-surface-container-low">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.1em] mb-1">Budget consommé</p>
+              <p className="text-lg font-semibold text-on-surface">
+                {(() => {
+                  if (parseFloat(costOverview.total_budget) > 0) {
+                    const pct = parseFloat(costOverview.total_cost) / parseFloat(costOverview.total_budget) * 100;
+                    return `${Math.round(pct)}%`;
+                  }
+                  return '—';
+                })()}
+              </p>
+              <p className="text-[9px] text-on-surface-variant mt-0.5">coût / budget</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

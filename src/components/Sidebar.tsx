@@ -21,14 +21,19 @@ import { apiServices } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { isPaginatedResponse } from '@/types/common';
 
-const navItems = [
+const navItems: {
+  icon: typeof LayoutDashboard;
+  label: string;
+  path: string;
+  anyOf?: string[];
+}[] = [
   { icon: LayoutDashboard, label: 'Tableau de bord', path: '/dashboard' },
   { icon: Package, label: 'Inventaire', path: '/inventory' },
   { icon: ArrowLeftRight, label: 'Mouvements', path: '/movements' },
   { icon: Construction, label: 'Chantiers', path: '/projects' },
   { icon: Warehouse, label: 'Lieux de stockage', path: '/storage' },
   { icon: Bell, label: 'Alertes', path: '/alerts' },
-  { icon: FileBarChart2, label: 'Rapports', path: '/reports' },
+  { icon: FileBarChart2, label: 'Rapports', path: '/reports', anyOf: ['reports.financial', 'reports.cost', 'reports.budget', 'reports.site'] },
   { icon: ClipboardCheck, label: 'Inventaires physiques', path: '/audits' },
 ];
 
@@ -80,6 +85,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       ),
     [hasPermission],
   );
+
+  const navItemsVisible = useMemo(
+    () =>
+      navItems.filter(
+        (item) => !item.anyOf?.length || item.anyOf.some((c) => hasPermission(c)),
+      ),
+    [hasPermission],
+  );
   const sideName = me ? userDisplayName(me.user) : null;
   const sideLine2 = me
     ? me.profile.job_title || me.profile.role_label || '—'
@@ -122,7 +135,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
+          {navItemsVisible.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

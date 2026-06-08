@@ -880,15 +880,10 @@ export default function MovementsPage() {
                 type="button"
                 onClick={async () => {
                   const params = new URLSearchParams();
-                  const urlParams = new URLSearchParams(window.location.search);
-                  const df = urlParams.get('date_from');
-                  const dt = urlParams.get('date_to');
-                  const mt = urlParams.get('movement_type');
-                  const proj = urlParams.get('project');
-                  if (df) params.set('date_from', df);
-                  if (dt) params.set('date_to', dt);
-                  if (mt) params.set('movement_type', mt);
-                  if (proj) params.set('project', proj);
+                  if (dateFrom) params.set('date_from', dateFrom);
+                  if (dateTo) params.set('date_to', dateTo);
+                  if (typeFilter && typeFilter !== 'all') params.set('movement_type', typeFilter);
+                  if (statusFilter) params.set('status', statusFilter);
                   const token = getAccessToken();
                   const res = await fetch(`/api/v1/stock-movements/export/?${params}`, {
                     headers: token ? { Authorization: `Bearer ${token}` } : {},

@@ -190,10 +190,15 @@ export default function ReportsPage() {
   const [selectedProject, setSelectedProject] = useState('');
   const [movDateFrom, setMovDateFrom] = useState('');
   const [movDateTo, setMovDateTo] = useState('');
+  const [movType, setMovType] = useState('');
+  const [movProject, setMovProject] = useState('');
+  const [consumptionProject, setConsumptionProject] = useState('');
   const [transferDateFrom, setTransferDateFrom] = useState('');
   const [transferDateTo, setTransferDateTo] = useState('');
-  const [supplierDateFrom, setSupplierDateFrom] = useState('');
-  const [supplierDateTo, setSupplierDateTo] = useState('');
+  const [supplierDateFrom, setSupplierDateFrom] = useState(
+    new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]
+  );
+  const [supplierDateTo, setSupplierDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [consumptionYear, setConsumptionYear] = useState(new Date().getFullYear());
 
   const handleDownload = async (key: string, url: string, filename: string) => {
@@ -280,7 +285,7 @@ export default function ReportsPage() {
 
         {/* R3 — Historique des mouvements */}
         <ReportCard icon={ArrowLeftRight} title="Historique mouvements" description="Toutes les entrées/sorties par période">
-          <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="grid grid-cols-2 gap-2 mb-2">
             <input
               type="date"
               value={movDateFrom}
@@ -296,6 +301,30 @@ export default function ReportsPage() {
               placeholder="Au"
             />
           </div>
+          <div className="flex gap-2 mb-3">
+            <select
+              value={movType}
+              onChange={(e) => setMovType(e.target.value)}
+              className="flex-1 px-2 py-1.5 text-xs border border-outline-variant/30 rounded-lg bg-white"
+            >
+              <option value="">Tous types</option>
+              <option value="entree">Entrée</option>
+              <option value="sortie">Sortie</option>
+              <option value="transfert">Transfert</option>
+              <option value="retour">Retour</option>
+              <option value="ajustement">Ajustement</option>
+            </select>
+            <select
+              value={movProject}
+              onChange={(e) => setMovProject(e.target.value)}
+              className="flex-1 px-2 py-1.5 text-xs border border-outline-variant/30 rounded-lg bg-white"
+            >
+              <option value="">Tous chantiers</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex flex-wrap gap-2">
             <ActionButton
               icon={FileSpreadsheet}
@@ -305,6 +334,8 @@ export default function ReportsPage() {
                 const params = new URLSearchParams();
                 if (movDateFrom) params.set('date_from', movDateFrom);
                 if (movDateTo) params.set('date_to', movDateTo);
+                if (movType) params.set('movement_type', movType);
+                if (movProject) params.set('project', movProject);
                 handleDownload('r3', `${BASE_URL}stock-movements/export/?${params}`, `mouvements-${today}.xlsx`);
               }}
             />
@@ -343,16 +374,26 @@ export default function ReportsPage() {
         {/* R6 — Consommation mensuelle */}
         {hasPermission('reports.financial') && (
           <ReportCard icon={CalendarDays} title="Consommation mensuelle" description="Coûts par catégorie, mois par mois">
-            <div className="mb-3">
+            <div className="flex gap-2 mb-3">
               <select
                 value={consumptionYear}
                 onChange={(e) => setConsumptionYear(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs border border-outline-variant/30 rounded-lg bg-white"
+                className="flex-1 px-2 py-1.5 text-xs border border-outline-variant/30 rounded-lg bg-white"
               >
                 {[...Array(5)].map((_, i) => {
                   const yr = new Date().getFullYear() - i;
                   return <option key={yr} value={yr}>{yr}</option>;
                 })}
+              </select>
+              <select
+                value={consumptionProject}
+                onChange={(e) => setConsumptionProject(e.target.value)}
+                className="flex-1 px-2 py-1.5 text-xs border border-outline-variant/30 rounded-lg bg-white"
+              >
+                <option value="">Tous chantiers</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
               </select>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -360,13 +401,18 @@ export default function ReportsPage() {
                 icon={FileSpreadsheet}
                 label="Excel"
                 loading={loading === 'r6'}
-                onClick={() => handleDownload('r6', `${BASE_URL}reports/monthly-consumption/?format=xlsx&year=${consumptionYear}`, `consommation-${consumptionYear}.xlsx`)}
+                onClick={() => {
+                  const params = new URLSearchParams({ format: 'xlsx' });
+                  params.set('year', String(consumptionYear));
+                  if (consumptionProject) params.set('project', consumptionProject);
+                  handleDownload('r6', `${BASE_URL}reports/monthly-consumption/?${params}`, `consommation-${consumptionYear}.xlsx`);
+                }}
               />
               <ActionButton
                 icon={Mail}
                 label="Email"
                 variant="secondary"
-                onClick={() => setEmailModal({ type: 'monthly_consumption', label: 'Consommation mensuelle', params: { year: consumptionYear } })}
+                onClick={() => setEmailModal({ type: 'monthly_consumption', label: 'Consommation mensuelle', params: { year: consumptionYear, ...(consumptionProject ? { project: consumptionProject } : {}) } })}
               />
             </div>
           </ReportCard>
