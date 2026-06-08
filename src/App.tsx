@@ -16,6 +16,7 @@ import NewStoragePage from './pages/NewStoragePage';
 import StorageDetailPage from './pages/StorageDetailPage';
 import EditStoragePage from './pages/EditStoragePage';
 import AlertsPage from './pages/AlertsPage';
+import ReportsPage from './pages/ReportsPage';
 import AuditsPage from './pages/AuditsPage';
 import AIAssistantPage from './pages/AIAssistantPage';
 import UsersPage from './pages/UsersPage';
@@ -75,6 +76,14 @@ export default function App() {
             <Route path="/storage/:id/edit" element={<EditStoragePage />} />
             <Route path="/storage/:id" element={<StorageDetailPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
+            <Route
+              path="/reports"
+              element={
+                <RequirePermission anyOf={['reports.financial', 'reports.cost', 'reports.budget', 'reports.site']}>
+                  <ReportsPage />
+                </RequirePermission>
+              }
+            />
             <Route path="/audits" element={<AuditsPage />} />
             <Route path="/ai-assistant" element={<AIAssistantPage />} />
             <Route

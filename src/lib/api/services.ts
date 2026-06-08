@@ -9,7 +9,9 @@ import type {
   AlertRefreshResult,
   AlertUnreadCount,
   ApprovalRule,
+  BudgetVsActualReport,
   Category,
+  DashboardCostOverview,
   DashboardRecentMovements,
   DashboardStockDistribution,
   DashboardSummary,
@@ -26,6 +28,7 @@ import type {
   ItemProjectAssignment,
   MeResponse,
   MeUpdatePayload,
+  MonthlyConsumptionReport,
   OrganizationSettings,
   PatchInput,
   Permission,
@@ -35,7 +38,10 @@ import type {
   ProjectPhase,
   ProjectResource,
   ProjectSummary,
+  SendReportEmailPayload,
+  SendReportEmailResult,
   StockValuationReport,
+  SupplierPerformanceReport,
   Role,
   RolePermission,
   Site,
@@ -355,6 +361,18 @@ export const apiServices = {
       unwrap(http.get<DashboardStockDistribution>('dashboard/stock-distribution/', { params })),
     recentMovements: (params?: { date_from?: string; date_to?: string }) =>
       unwrap(http.get<DashboardRecentMovements>('dashboard/recent-movements/', { params })),
+    costOverview: () =>
+      unwrap(http.get<DashboardCostOverview>('dashboard/cost-overview/')),
+  },
+  reports: {
+    monthlyConsumption: (params: { year: number; project?: string }) =>
+      unwrap(http.get<MonthlyConsumptionReport>('reports/monthly-consumption/', { params: compactParams(params) })),
+    supplierPerformance: (params?: { date_from?: string; date_to?: string }) =>
+      unwrap(http.get<SupplierPerformanceReport>('reports/supplier-performance/', { params: compactParams(params) })),
+    budgetVsActual: () =>
+      unwrap(http.get<BudgetVsActualReport>('reports/budget-vs-actual/')),
+    sendByEmail: (payload: SendReportEmailPayload) =>
+      unwrap(http.post<SendReportEmailResult>('reports/send-by-email/', payload)),
   },
 };
 

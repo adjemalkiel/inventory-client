@@ -48,3 +48,33 @@
   box-shadow: 0 10px 40px -10px rgba(9, 20, 38, 0.15);
 }
 
+/* ─── Print styles (Section 9) ─── */
+@media print {
+  nav, aside, .sidebar, .topnav, [data-print-hidden] {
+    display: none !important;
+  }
+
+  main, .print-content {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-header {
+    display: block !important;
+  }
+
+  tr, .report-card {
+    page-break-inside: avoid;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+.print-header {
+  display: none;
+}
+

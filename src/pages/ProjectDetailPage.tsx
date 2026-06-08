@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   CreditCard,
+  Download,
   HardHat,
   LayoutDashboard,
   MapPin,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiServices } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
 import { isPaginatedResponse } from '@/types/common';
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import type {
@@ -851,7 +853,7 @@ export default function ProjectDetailPage() {
 
       {/* Onglet Coûts */}
       {activeTab === 'couts' ? (
-        <CoutsTab costBreakdown={costBreakdown} currency={currency} />
+        <CoutsTab costBreakdown={costBreakdown} currency={currency} projectId={project.id} />
       ) : null}
 
       {/* Onglet 4 — Stock & mouvements */}
@@ -1765,9 +1767,11 @@ function BudgetTab({
 function CoutsTab({
   costBreakdown,
   currency,
+  projectId,
 }: {
   costBreakdown: ProjectCostBreakdown | null;
   currency: string;
+  projectId: string;
 }) {
   if (!costBreakdown) {
     return (
@@ -1794,6 +1798,32 @@ function CoutsTab({
 
   return (
     <section className="space-y-6">
+      {/* Export button */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={async () => {
+            const token = getAccessToken();
+            const res = await fetch(`/api/v1/projects/${projectId}/cost-breakdown/export/`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              credentials: 'include',
+            });
+            if (!res.ok) return;
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `cout-chantier-${new Date().toISOString().split('T')[0]}.xlsx`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary border border-primary/20 rounded-xl hover:bg-primary/5 transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          Exporter Excel
+        </button>
+      </div>
+
       {/* A — Cartes de synthèse */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard

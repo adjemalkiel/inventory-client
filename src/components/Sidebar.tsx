@@ -12,6 +12,7 @@ import {
   Users, 
   Settings,
   HardHat,
+  FileBarChart2,
   X
 } from 'lucide-react';
 import { useCurrentUser } from '@/context/CurrentUserContext';
@@ -27,6 +28,7 @@ const navItems = [
   { icon: Construction, label: 'Chantiers', path: '/projects' },
   { icon: Warehouse, label: 'Lieux de stockage', path: '/storage' },
   { icon: Bell, label: 'Alertes', path: '/alerts' },
+  { icon: FileBarChart2, label: 'Rapports', path: '/reports' },
   { icon: ClipboardCheck, label: 'Inventaires physiques', path: '/audits' },
 ];
 

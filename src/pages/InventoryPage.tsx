@@ -20,6 +20,7 @@ import {
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { apiServices } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
 import type { Category, DashboardSummary, Item, StorageLocation, StockValuationReport, Supplier } from '@/types/api';
 
 function TableSkeletonRows({ cols }: { cols: number }) {
@@ -277,6 +278,21 @@ export default function InventoryPage() {
           <button
             type="button"
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 md:px-5 py-2.5 text-primary bg-white border border-outline-variant/30 rounded-xl font-semibold text-sm hover:bg-surface-container-low transition-all duration-400"
+            onClick={async () => {
+              const token = getAccessToken();
+              const res = await fetch('/api/v1/items/stock-valuation/export/', {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                credentials: 'include',
+              });
+              if (!res.ok) return;
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `inventaire-valorise-${new Date().toISOString().split('T')[0]}.xlsx`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
           >
             <Download className="w-4 h-4 md:w-5 md:h-5" />
             <span>Exporter</span>

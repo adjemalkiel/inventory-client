@@ -18,6 +18,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { apiServices } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
 import type { DjangoUser, StockMovement, StockMovementStatus, StockMovementType } from '@/types/api';
 import { isPaginatedResponse } from '@/types/common';
 
@@ -863,17 +864,51 @@ export default function MovementsPage() {
           <div className="relative z-10">
             <h3 className="font-headline mb-2 text-lg font-bold">Export de données</h3>
             <p className="mb-6 text-sm leading-relaxed text-slate-400">
-              Téléchargez les lignes affichées dans le tableau (page courante).
+              Téléchargez les mouvements filtrés (page courante ou complet).
             </p>
-            <button
-              type="button"
-              disabled={movements.length === 0}
-              onClick={exportCurrentPageCsv}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 font-bold text-primary transition-all hover:bg-slate-100 active:scale-95 disabled:opacity-40"
-            >
-              <Download className="h-5 w-5" />
-              <span>Exporter la page courante</span>
-            </button>
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={movements.length === 0}
+                onClick={exportCurrentPageCsv}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 font-bold text-primary transition-all hover:bg-slate-100 active:scale-95 disabled:opacity-40"
+              >
+                <Download className="h-5 w-5" />
+                <span>Exporter la page (CSV)</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const params = new URLSearchParams();
+                  const urlParams = new URLSearchParams(window.location.search);
+                  const df = urlParams.get('date_from');
+                  const dt = urlParams.get('date_to');
+                  const mt = urlParams.get('movement_type');
+                  const proj = urlParams.get('project');
+                  if (df) params.set('date_from', df);
+                  if (dt) params.set('date_to', dt);
+                  if (mt) params.set('movement_type', mt);
+                  if (proj) params.set('project', proj);
+                  const token = getAccessToken();
+                  const res = await fetch(`/api/v1/stock-movements/export/?${params}`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    credentials: 'include',
+                  });
+                  if (!res.ok) return;
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `mouvements-complet-${new Date().toISOString().split('T')[0]}.xlsx`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 border border-white/20 py-3 font-bold text-white transition-all hover:bg-white/20 active:scale-95"
+              >
+                <Download className="h-5 w-5" />
+                <span>Exporter tout (Excel)</span>
+              </button>
+            </div>
           </div>
           <FileText className="absolute -bottom-10 -right-10 h-40 w-40 rotate-12 transform text-white/10" />
         </div>

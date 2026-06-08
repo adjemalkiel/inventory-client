@@ -769,3 +769,86 @@ export interface DashboardMovementRow {
 export interface DashboardRecentMovements {
   movements: DashboardMovementRow[];
 }
+
+// ── Section 9 — Reports & Exports ───────────────────────────
+
+export interface MonthlyConsumptionRow {
+  category: string;
+  total_cost: string;
+  total_qty: string;
+}
+export interface MonthlyConsumptionMonth {
+  month: number;
+  month_label: string;
+  by_category: MonthlyConsumptionRow[];
+  month_total: string;
+}
+export interface MonthlyConsumptionReport {
+  year: number;
+  months: MonthlyConsumptionMonth[];
+  grand_total: string;
+}
+
+export interface SupplierPerformanceRow {
+  fournisseur: string;
+  nb_livraisons: number;
+  qty_totale: string;
+  valeur_totale: string;
+  prix_moyen: string;
+  prix_min: string;
+  prix_max: string;
+  ecart_prix: string;
+  derniere_livraison: string | null;
+}
+export interface SupplierPerformanceReport {
+  suppliers: SupplierPerformanceRow[];
+  period: { from: string | null; to: string | null };
+}
+
+export interface DashboardCostOverviewProject {
+  project_id: string;
+  name: string;
+  reference: string;
+  currency: string;
+  cost_total: string;
+  budget_total: string;
+  contract_value: string | null;
+  margin: string | null;
+  margin_percent: number | null;
+  budget_consumed_percent: number | null;
+  over_budget: boolean;
+}
+export interface DashboardCostOverview {
+  total_budget: string;
+  total_cost: string;
+  total_contract_value: string | null;
+  global_margin: string | null;
+  global_margin_percent: number | null;
+  active_projects_count: number;
+  projects: DashboardCostOverviewProject[];
+}
+
+export interface BudgetVsActualProject {
+  name: string;
+  reference: string;
+  budget_total: string;
+  cost_total: string;
+  contract_value: string | null;
+  margin: string | null;
+  margin_percent: number | null;
+  over_budget: boolean;
+}
+export interface BudgetVsActualReport {
+  projects: BudgetVsActualProject[];
+}
+
+export interface SendReportEmailPayload {
+  report_type: 'stock_valuation' | 'project_cost' | 'monthly_consumption' | 'supplier_performance';
+  recipient_email: string;
+  params?: Record<string, string | number>;
+}
+export interface SendReportEmailResult {
+  sent: boolean;
+  delivery_kind: string;
+  recipient: string;
+}
