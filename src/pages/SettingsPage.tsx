@@ -27,7 +27,7 @@ import {
 import { useCurrentUser } from '@/context/CurrentUserContext';
 import { apiServices, organizationSettingsApi, type SmtpTestPayload } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import type { Integration, OrganizationSettings } from '@/types/api';
+import type { ApprovalThreshold, Category, Integration, OrganizationSettings, Role, UnitOfMeasure, UserRole } from '@/types/api';
 import type { UUID } from '@/types/common';
 
 type SmtpEncryption = 'starttls' | 'ssl' | 'none';
@@ -135,6 +135,53 @@ export default function SettingsPage() {
   const [alertSettingsMsg, setAlertSettingsMsg] = useState<string | null>(null);
   const [alertSettingsErr, setAlertSettingsErr] = useState<string | null>(null);
   const smtpModalOpenRef = useRef(false);
+
+  // Section 10 — Profil de l'organisation
+  const [orgProfile, setOrgProfile] = useState({
+    company_name: '',
+    company_address: '',
+    company_city: '',
+    company_country: '',
+    company_phone: '',
+    company_email: '',
+    company_website: '',
+    company_tax_id: '',
+  });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+  const [profileErr, setProfileErr] = useState<string | null>(null);
+
+  // Section 10 — Données de référence (catégories, unités, fournisseurs, sites, agences)
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string; parent: string | null }>>([]);
+  const [unitsList, setUnitsList] = useState<Array<{ id: string; name: string; symbol: string; is_active: boolean }>>([]);
+  const [refModalOpen, setRefModalOpen] = useState(false);
+  const [refModalType, setRefModalType] = useState<'category' | 'unit'>('category');
+  const [refModalEdit, setRefModalEdit] = useState<any | null>(null);
+  const [refModalName, setRefModalName] = useState('');
+  const [refModalParentId, setRefModalParentId] = useState<string | null>(null);
+  const [refModalSymbol, setRefModalSymbol] = useState('');
+  const [refModalSaving, setRefModalSaving] = useState(false);
+  const [refModalErr, setRefModalErr] = useState<string | null>(null);
+
+  // Section 10 — Workflows d'approbation
+  const [approvalThresholds, setApprovalThresholds] = useState<Array<{
+    id: string; label: string; movement_scope: string; movement_scope_label: string;
+    min_amount: string | null; max_amount: string | null;
+    required_role_code: string; is_active: boolean; order: number;
+  }>>([]);
+  const [atModalOpen, setAtModalOpen] = useState(false);
+  const [atModalEdit, setAtModalEdit] = useState<any | null>(null);
+  const [atForm, setAtForm] = useState({
+    label: '', movement_scope: 'all', min_amount: '', max_amount: '',
+    required_role_code: 'chef_chantier', is_active: true, order: 0,
+  });
+  const [atSaving, setAtSaving] = useState(false);
+
+  // Section 10 — Rôles & Permissions
+  const [rolesList, setRolesList] = useState<Array<{ id: string; code: string; name: string }>>([]);
+  const [userRolesList, setUserRolesList] = useState<Array<{ user: number; role: string }>>([]);
 
   const openSmtpModal = () => {
     setFormErr(null);
@@ -269,6 +316,20 @@ export default function SettingsPage() {
         setAlertPendingHours(row.pending_approval_threshold_hours ?? 24);
         setAlertInventoryGapCost(row.inventory_gap_min_cost ?? '50000');
         setAlertAbnormalThreshold(row.abnormal_movement_threshold ?? '500000');
+        // Section 10 — Profil organisation
+        setOrgProfile({
+          company_name: row.company_name ?? '',
+          company_address: row.company_address ?? '',
+          company_city: row.company_city ?? '',
+          company_country: row.company_country ?? '',
+          company_phone: row.company_phone ?? '',
+          company_email: row.company_email ?? '',
+          company_website: row.company_website ?? '',
+          company_tax_id: row.company_tax_id ?? '',
+        });
+        if (row.company_logo) {
+          setLogoPreview(row.company_logo);
+        }
       } else {
         setOrgId(null);
       }
@@ -278,6 +339,24 @@ export default function SettingsPage() {
           ? String(e.response.data.detail)
           : "Impossible de charger les paramètres.",
       );
+    }
+
+    // Charger données de référence
+    try {
+      const [cats, units, thresholds, roles, userRoles] = await Promise.all([
+        apiServices.categories.list(),
+        apiServices.unitsOfMeasure.list(),
+        apiServices.approvalThresholds.list().catch(() => [] as ApprovalThreshold[]),
+        apiServices.roles.list().catch(() => [] as Role[]),
+        apiServices.userRoles.list().catch(() => [] as UserRole[]),
+      ]);
+      setCategoriesList(cats);
+      setUnitsList(units);
+      setApprovalThresholds(thresholds);
+      setRolesList(roles);
+      setUserRolesList(userRoles);
+    } catch {
+      // Silencieux — les données de référence ne bloquent pas
     }
   }, []);
 
@@ -570,6 +649,160 @@ export default function SettingsPage() {
     }
   };
 
+  // ─── Section 10 — Profil organisation ───────────────────────────────────
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setLogoPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const saveOrgProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgId) return;
+    setProfileSaving(true);
+    setProfileErr(null);
+    setProfileMsg(null);
+    try {
+      const formData = new FormData();
+      Object.entries(orgProfile).forEach(([k, v]) => formData.append(k, String(v)));
+      if (logoFile) formData.append('company_logo', logoFile);
+      const updated = await apiServices.organizationSettings.patchFormData(orgId, formData);
+      setOrg(updated);
+      setProfileMsg('Profil de l\'organisation enregistré.');
+    } catch (err) {
+      setProfileErr(
+        axios.isAxiosError(err) && err.response?.data?.detail
+          ? String(err.response.data.detail)
+          : "Impossible d'enregistrer le profil.",
+      );
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  // ─── Section 10 — Données de référence ──────────────────────────────────
+  const openRefModal = (type: 'category' | 'unit', edit?: any) => {
+    setRefModalType(type);
+    setRefModalEdit(edit ?? null);
+    setRefModalName(edit?.name ?? '');
+    setRefModalParentId(edit?.parent ?? null);
+    setRefModalSymbol(edit?.symbol ?? '');
+    setRefModalErr(null);
+    setRefModalOpen(true);
+  };
+
+  const saveRefItem = async () => {
+    if (!refModalName.trim()) {
+      setRefModalErr('Le nom est requis.');
+      return;
+    }
+    setRefModalSaving(true);
+    setRefModalErr(null);
+    try {
+      if (refModalType === 'category') {
+        if (refModalEdit) {
+          await apiServices.categories.patch(refModalEdit.id, { name: refModalName.trim(), parent: refModalParentId });
+        } else {
+          await apiServices.categories.create({ name: refModalName.trim(), parent: refModalParentId } as any);
+        }
+        const cats = await apiServices.categories.list();
+        setCategoriesList(cats);
+      } else {
+        if (refModalEdit) {
+          await apiServices.unitsOfMeasure.patch(refModalEdit.id, { name: refModalName.trim(), symbol: refModalSymbol.trim() });
+        } else {
+          await apiServices.unitsOfMeasure.create({ name: refModalName.trim(), symbol: refModalSymbol.trim() } as any);
+        }
+        const units = await apiServices.unitsOfMeasure.list();
+        setUnitsList(units);
+      }
+      setRefModalOpen(false);
+    } catch (err: any) {
+      setRefModalErr(
+        axios.isAxiosError(err) && err.response?.data
+          ? Object.values(err.response.data).flat().join(' ')
+          : "Erreur d'enregistrement.",
+      );
+    } finally {
+      setRefModalSaving(false);
+    }
+  };
+
+  const deleteRefItem = async (type: 'category' | 'unit', id: string) => {
+    if (!window.confirm('Supprimer cet élément ?')) return;
+    try {
+      if (type === 'category') {
+        await apiServices.categories.remove(id);
+        const cats = await apiServices.categories.list();
+        setCategoriesList(cats);
+      } else {
+        await apiServices.unitsOfMeasure.remove(id);
+        const units = await apiServices.unitsOfMeasure.list();
+        setUnitsList(units);
+      }
+    } catch (err: any) {
+      alert(
+        axios.isAxiosError(err) && err.response?.status === 400
+          ? 'Suppression impossible : cet élément est référencé par au moins un article ou un mouvement.'
+          : "Erreur lors de la suppression.",
+      );
+    }
+  };
+
+  // ─── Section 10 — Workflows d'approbation ───────────────────────────────
+  const openAtModal = (edit?: any) => {
+    setAtModalEdit(edit ?? null);
+    setAtForm({
+      label: edit?.label ?? '',
+      movement_scope: edit?.movement_scope ?? 'all',
+      min_amount: edit?.min_amount ?? '',
+      max_amount: edit?.max_amount ?? '',
+      required_role_code: edit?.required_role_code ?? 'chef_chantier',
+      is_active: edit?.is_active ?? true,
+      order: edit?.order ?? 0,
+    });
+    setAtModalOpen(true);
+  };
+
+  const saveAt = async () => {
+    if (!atForm.label.trim()) return;
+    setAtSaving(true);
+    try {
+      if (atModalEdit) {
+        await apiServices.approvalThresholds.patch(atModalEdit.id, atForm);
+      } else {
+        await apiServices.approvalThresholds.create(atForm as any);
+      }
+      const thresholds = await apiServices.approvalThresholds.list();
+      setApprovalThresholds(thresholds);
+      setAtModalOpen(false);
+    } catch {
+      // Erreur silencieuse
+    } finally {
+      setAtSaving(false);
+    }
+  };
+
+  const toggleAtActive = async (id: string, is_active: boolean) => {
+    try {
+      await apiServices.approvalThresholds.patch(id, { is_active: !is_active } as any);
+      setApprovalThresholds((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, is_active: !is_active } : t)),
+      );
+    } catch { /* silencieux */ }
+  };
+
+  const deleteAt = async (id: string) => {
+    if (!window.confirm('Supprimer ce seuil ?')) return;
+    try {
+      await apiServices.approvalThresholds.remove(id);
+      setApprovalThresholds((prev) => prev.filter((t) => t.id !== id));
+    } catch { /* silencieux */ }
+  };
+
   return (
     <div className="space-y-10 pb-10">
       {/* Header Section */}
@@ -585,9 +818,139 @@ export default function SettingsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Main Configuration Column */}
         <div className="lg:col-span-8 space-y-8">
+
+          {/* ── Section 10 — Profil de l'organisation ──────────────────── */}
+          <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 border-l-4 border-primary">
+            <div className="flex items-center mb-6">
+              <div className="w-12 h-12 rounded-xl bg-primary-fixed flex items-center justify-center text-primary mr-4">
+                <HardHat className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-lg font-headline font-bold text-primary">Profil de l'organisation</h4>
+                <p className="text-sm text-slate-500">Informations légales de l'entreprise (affichées sur les exports et les emails).</p>
+              </div>
+            </div>
+            <form className="space-y-6" onSubmit={saveOrgProfile}>
+              <div className="flex flex-col sm:flex-row gap-6">
+                {/* Logo */}
+                <div className="shrink-0">
+                  <label className="relative cursor-pointer group block w-28 h-28 rounded-xl border-2 border-dashed border-slate-200 hover:border-primary transition-colors overflow-hidden bg-slate-50">
+                    {logoPreview ? (
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-slate-400 text-xs font-medium text-center px-2">
+                        Logo PNG/JPG
+                      </div>
+                    )}
+                    <input type="file" accept="image/png,image/jpeg,image/jpg" onChange={handleLogoChange} className="hidden" />
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="text-white text-[10px] font-bold">Changer</span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Fields */}
+                <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Nom légal</label>
+                    <input
+                      type="text"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_name}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_name: e.target.value }))}
+                      placeholder="Raison sociale de l'entreprise"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">RCCM / NIF</label>
+                    <input
+                      type="text"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_tax_id}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_tax_id: e.target.value }))}
+                      placeholder="N° identification fiscale"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Téléphone</label>
+                    <input
+                      type="text"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_phone}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_phone: e.target.value }))}
+                      placeholder="+229 01 23 45 67"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Email</label>
+                    <input
+                      type="email"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_email}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_email: e.target.value }))}
+                      placeholder="contact@entreprise.bj"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Site web</label>
+                    <input
+                      type="url"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_website}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_website: e.target.value }))}
+                      placeholder="https://entreprise.bj"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Adresse</label>
+                    <input
+                      type="text"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_address}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_address: e.target.value }))}
+                      placeholder="Quartier, rue, lot..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Ville</label>
+                    <input
+                      type="text"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_city}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_city: e.target.value }))}
+                      placeholder="Cotonou"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Pays</label>
+                    <input
+                      type="text"
+                      className="w-full h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-primary focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                      value={orgProfile.company_country}
+                      onChange={(e) => setOrgProfile((p) => ({ ...p, company_country: e.target.value }))}
+                      placeholder="Bénin"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 pt-2">
+                <button
+                  type="submit"
+                  disabled={profileSaving}
+                  className="px-6 py-2.5 bg-primary text-white font-semibold text-sm rounded-xl shadow-lg hover:bg-primary-container transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {profileSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Enregistrer
+                </button>
+                {profileMsg && <span className="text-sm font-medium text-emerald-600">{profileMsg}</span>}
+                {profileErr && <span className="text-sm font-medium text-error">{profileErr}</span>}
+              </div>
+            </form>
+          </section>
+
           {/* Categories Section */}
           <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 transition-all hover:translate-y-[-2px]">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
               <div className="flex items-center">
                 <div className="w-12 h-12 rounded-xl bg-primary-fixed flex items-center justify-center text-primary mr-4">
                   <Package className="w-6 h-6" />
@@ -597,19 +960,38 @@ export default function SettingsPage() {
                   <p className="text-sm text-slate-500">Structurez votre inventaire par types de ressources.</p>
                 </div>
               </div>
-              <button className="px-6 py-2.5 bg-primary text-white font-bold rounded-xl text-sm hover:bg-primary-container transition-all">
-                Gérer les catégories
+              <button
+                onClick={() => openRefModal('category')}
+                className="px-6 py-2.5 bg-primary text-white font-bold rounded-xl text-sm hover:bg-primary-container transition-all"
+              >
+                + Ajouter
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center">
-                <span className="font-bold text-sm text-primary">Matériaux bruts</span>
-                <span className="bg-primary-container/10 text-primary px-2 py-1 rounded text-[10px] font-bold">12 articles</span>
-              </div>
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center">
-                <span className="font-bold text-sm text-primary">Outillage électroportatif</span>
-                <span className="bg-primary-container/10 text-primary px-2 py-1 rounded text-[10px] font-bold">45 articles</span>
-              </div>
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {categoriesList.map((cat) => (
+                <div key={cat.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <span className="font-bold text-sm text-primary">{cat.name}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => openRefModal('category', cat)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-white transition-colors"
+                      title="Modifier"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => deleteRefItem('category', cat.id)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-error hover:bg-white transition-colors"
+                      title="Supprimer"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {categoriesList.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">Aucune catégorie définie.</p>
+              )}
             </div>
           </section>
 
@@ -767,6 +1149,71 @@ export default function SettingsPage() {
             </form>
           </section>
 
+          {/* ── Section 10 — Workflows d'approbation ─────────────────── */}
+          <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 border-l-4 border-primary">
+            <div className="flex items-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-primary-fixed flex items-center justify-center text-primary mr-4">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-lg font-headline font-bold text-primary">Workflows d'approbation</h4>
+                <p className="text-sm text-slate-500">
+                  Définissez quel rôle doit approuver un mouvement selon sa valeur. La première règle correspondante s'applique.
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto mb-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="text-left py-2 pr-4">#</th>
+                    <th className="text-left py-2 pr-4">Type de mouvement</th>
+                    <th className="text-right py-2 pr-4">De (XOF)</th>
+                    <th className="text-right py-2 pr-4">À (XOF)</th>
+                    <th className="text-left py-2 pr-4">Rôle requis</th>
+                    <th className="text-center py-2 pr-4">Statut</th>
+                    <th className="text-right py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {approvalThresholds.map((t, idx) => (
+                    <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/50">
+                      <td className="py-3 pr-4 font-medium text-slate-500">{idx + 1}</td>
+                      <td className="py-3 pr-4 font-bold text-primary">{t.movement_scope_label}</td>
+                      <td className="py-3 pr-4 text-right">{t.min_amount ?? '0'}</td>
+                      <td className="py-3 pr-4 text-right">{t.max_amount ?? '—'}</td>
+                      <td className="py-3 pr-4 capitalize">{t.required_role_code.replace(/_/g, ' ')}</td>
+                      <td className="py-3 pr-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleAtActive(t.id, t.is_active)}
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            t.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {t.is_active ? '● Actif' : '○ Inactif'}
+                        </button>
+                      </td>
+                      <td className="py-3 pr-4 text-right">
+                        <button onClick={() => openAtModal(t)} className="text-slate-400 hover:text-primary mr-2" title="Modifier">✏️</button>
+                        <button onClick={() => deleteAt(t.id)} className="text-slate-400 hover:text-error" title="Supprimer">🗑️</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {approvalThresholds.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-6">Aucun seuil configuré.</p>
+              )}
+            </div>
+            <button
+              onClick={() => openAtModal()}
+              className="px-6 py-2.5 bg-primary text-white font-bold rounded-xl text-sm hover:bg-primary-container transition-all"
+            >
+              + Ajouter une règle
+            </button>
+          </section>
+
           {/* Stock valuation (Section 7) */}
           <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 border-l-4 border-primary">
             <div className="flex items-center mb-6">
@@ -869,20 +1316,50 @@ export default function SettingsPage() {
 
           {/* Units and Locations */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+            {/* Unités de mesure */}
             <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
-              <Ruler className="w-8 h-8 text-primary mb-4" />
-              <h4 className="text-md font-headline font-bold text-primary mb-1">Unités de mesure</h4>
-              <p className="text-xs text-slate-500 mb-6 font-medium">m², kg, m³, unités...</p>
-              <button className="text-xs font-bold text-primary underline underline-offset-8 uppercase tracking-widest hover:text-primary-container transition-colors">
-                Modifier la liste
-              </button>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <Ruler className="w-8 h-8 text-primary mb-1" />
+                  <h4 className="text-md font-headline font-bold text-primary">Unités de mesure</h4>
+                  <p className="text-xs text-slate-500 font-medium">kg, m³, unités...</p>
+                </div>
+                <button
+                  onClick={() => openRefModal('unit')}
+                  className="px-4 py-2 bg-primary text-white font-bold rounded-xl text-xs hover:bg-primary-container transition-all"
+                >
+                  + Ajouter
+                </button>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {unitsList.map((u) => (
+                  <div key={u.id} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg border border-slate-100">
+                    <div>
+                      <span className="font-bold text-sm text-primary">{u.name}</span>
+                      {u.symbol && <span className="text-xs text-slate-400 ml-1">({u.symbol})</span>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openRefModal('unit', u)} className="p-1 rounded text-slate-400 hover:text-primary" title="Modifier">✏️</button>
+                      <button onClick={() => deleteRefItem('unit', u.id)} className="p-1 rounded text-slate-400 hover:text-error" title="Supprimer">🗑️</button>
+                    </div>
+                  </div>
+                ))}
+                {unitsList.length === 0 && (
+                  <p className="text-sm text-slate-400 text-center py-4">Aucune unité définie.</p>
+                )}
+              </div>
             </section>
+
+            {/* Lieux */}
             <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
               <MapPin className="w-8 h-8 text-primary mb-4" />
-              <h4 className="text-md font-headline font-bold text-primary mb-1">Lieux</h4>
-              <p className="text-xs text-slate-500 mb-6 font-medium">Dépôts, entrepôts, zones de transit.</p>
-              <button className="text-xs font-bold text-primary underline underline-offset-8 uppercase tracking-widest hover:text-primary-container transition-colors">
-                Configurer les zones
+              <h4 className="text-md font-headline font-bold text-primary mb-1">Sites & Agences</h4>
+              <p className="text-xs text-slate-500 mb-4 font-medium">Dépôts, entrepôts, zones de transit. Gérés depuis <strong>Lieux de stockage</strong>.</p>
+              <button
+                onClick={() => window.location.href = '/storage'}
+                className="text-xs font-bold text-primary underline underline-offset-8 uppercase tracking-widest hover:text-primary-container transition-colors"
+              >
+                Gérer les lieux
               </button>
             </section>
           </div>
@@ -919,22 +1396,33 @@ export default function SettingsPage() {
 
           {/* Roles & Security */}
           <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 border-l-4 border-primary">
-            <h4 className="text-lg font-headline font-bold text-primary mb-2">Rôles & Permissions</h4>
-            <p className="text-sm text-slate-500 mb-6">Définissez qui peut voir, modifier ou supprimer les données.</p>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Shield className="w-4 h-4 text-slate-400" />
-                <span className="text-sm font-bold text-primary">Administrateurs (3)</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <HardHat className="w-4 h-4 text-slate-400" />
-                <span className="text-sm font-bold text-primary">Chefs de chantier (12)</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <Warehouse className="w-4 h-4 text-slate-400" />
-                <span className="text-sm font-bold text-primary">Magasiniers (5)</span>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h4 className="text-lg font-headline font-bold text-primary mb-1">Rôles & Permissions</h4>
+                <p className="text-sm text-slate-500">Définissez qui peut voir, modifier ou supprimer les données.</p>
               </div>
             </div>
+            <div className="space-y-2 mb-4">
+              {rolesList.map((role) => {
+                const count = userRolesList.filter((ur) => ur.role === role.id).length;
+                return (
+                  <div key={role.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <Shield className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span className="font-bold text-sm text-primary flex-1">{role.name}</span>
+                    <span className="text-xs font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full">{count} utilisateur{count > 1 ? 's' : ''}</span>
+                  </div>
+                );
+              })}
+              {rolesList.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">Aucun rôle configuré.</p>
+              )}
+            </div>
+            <a
+              href="/users"
+              className="text-xs font-bold text-primary underline underline-offset-8 uppercase tracking-widest hover:text-primary-container transition-colors"
+            >
+              Gérer les utilisateurs
+            </a>
           </section>
 
           {/* Integrations + SMTP e-mail */}
@@ -1412,6 +1900,175 @@ export default function SettingsPage() {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal référence (catégorie / unité) ──────────────────────── */}
+      {refModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-primary/40 backdrop-blur-sm" role="presentation">
+          <div className="absolute inset-0" onClick={() => setRefModalOpen(false)} />
+          <div
+            className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 p-6"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="font-headline text-lg font-bold text-primary mb-4">
+              {refModalEdit ? 'Modifier' : 'Ajouter'} {refModalType === 'category' ? 'une catégorie' : 'une unité'}
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Nom *</label>
+                <input
+                  type="text"
+                  className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  value={refModalName}
+                  onChange={(e) => setRefModalName(e.target.value)}
+                  placeholder={refModalType === 'category' ? 'Ex: Quincaillerie' : 'Ex: Kilogramme'}
+                />
+              </div>
+              {refModalType === 'unit' && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Symbole</label>
+                  <input
+                    type="text"
+                    className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    value={refModalSymbol}
+                    onChange={(e) => setRefModalSymbol(e.target.value)}
+                    placeholder="Ex: kg, m³"
+                  />
+                </div>
+              )}
+              {refModalType === 'category' && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Parent</label>
+                  <select
+                    className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    value={refModalParentId ?? ''}
+                    onChange={(e) => setRefModalParentId(e.target.value || null)}
+                  >
+                    <option value="">Aucune (catégorie racine)</option>
+                    {categoriesList.filter((c) => c.id !== refModalEdit?.id).map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {refModalErr && <p className="text-xs font-medium text-error">{refModalErr}</p>}
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRefModalOpen(false)}
+                  className="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-primary transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={saveRefItem}
+                  disabled={refModalSaving}
+                  className="px-5 py-2.5 bg-primary text-white font-bold text-sm rounded-xl hover:bg-primary-container transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {refModalSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {refModalEdit ? 'Modifier' : 'Enregistrer'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal seuil d'approbation ────────────────────────────────── */}
+      {atModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-primary/40 backdrop-blur-sm" role="presentation">
+          <div className="absolute inset-0" onClick={() => setAtModalOpen(false)} />
+          <div
+            className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 p-6"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="font-headline text-lg font-bold text-primary mb-4">
+              {atModalEdit ? 'Modifier' : 'Ajouter'} un seuil d'approbation
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Libellé *</label>
+                <input
+                  type="text"
+                  className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  value={atForm.label}
+                  onChange={(e) => setAtForm((f) => ({ ...f, label: e.target.value }))}
+                  placeholder="Ex: Sortie < 100 000 XOF"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Type de mouvement</label>
+                <select
+                  className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  value={atForm.movement_scope}
+                  onChange={(e) => setAtForm((f) => ({ ...f, movement_scope: e.target.value }))}
+                >
+                  <option value="all">Tous les types</option>
+                  <option value="sortie">Sortie vers chantier</option>
+                  <option value="transfert">Transfert inter-sites</option>
+                  <option value="ajustement">Ajustement / perte</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Montant min (XOF)</label>
+                  <input
+                    type="number"
+                    className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    value={atForm.min_amount}
+                    onChange={(e) => setAtForm((f) => ({ ...f, min_amount: e.target.value }))}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Montant max (XOF)</label>
+                  <input
+                    type="number"
+                    className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    value={atForm.max_amount}
+                    onChange={(e) => setAtForm((f) => ({ ...f, max_amount: e.target.value }))}
+                    placeholder="Illimité"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Rôle requis</label>
+                <select
+                  className="w-full h-11 rounded-lg border border-slate-200 px-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  value={atForm.required_role_code}
+                  onChange={(e) => setAtForm((f) => ({ ...f, required_role_code: e.target.value }))}
+                >
+                  {rolesList.map((r) => (
+                    <option key={r.id} value={r.code}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAtModalOpen(false)}
+                  className="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-primary transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={saveAt}
+                  disabled={atSaving}
+                  className="px-5 py-2.5 bg-primary text-white font-bold text-sm rounded-xl hover:bg-primary-container transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {atSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {atModalEdit ? 'Modifier' : 'Enregistrer'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

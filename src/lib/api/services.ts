@@ -4,11 +4,14 @@ import http from './http';
 import { getAccessToken } from '@/lib/auth';
 import type {
   ActivityEvent,
+  ActivityEventItem,
+  ActivityLogResponse,
   Agency,
   Alert,
   AlertRefreshResult,
   AlertUnreadCount,
   ApprovalRule,
+  ApprovalThreshold,
   BudgetVsActualReport,
   Category,
   DashboardCostOverview,
@@ -332,8 +335,32 @@ export const apiServices = {
     },
   },
   approvalRules: createCrudService<ApprovalRule>('approval-rules'),
+  approvalThresholds: createCrudService<ApprovalThreshold>('approval-thresholds'),
+  activityLog: {
+    list: (params?: { limit?: number; type?: string }) =>
+      unwrap(http.get<ActivityLogResponse>('activity-log/', { params: compactParams(params as Record<string, string | number | boolean | undefined | null>) })),
+  },
   itemProjectAssignments: createCrudService<ItemProjectAssignment>('item-project-assignments'),
-  organizationSettings: createCrudService<OrganizationSettings>('organization-settings'),
+  organizationSettings: {
+    ...createCrudService<OrganizationSettings>('organization-settings'),
+    patchFormData: async (id: UUID, formData: FormData) => {
+      const baseUrl = (http.defaults.baseURL ?? '/api/v1/').replace(/\/?$/, '/');
+      const url = `${baseUrl}organization-settings/${id}/`;
+      const token = getAccessToken();
+      const res = await fetch(url, {
+        method: 'PATCH',
+        body: formData,
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = typeof data?.detail === 'string' ? data.detail : `Erreur (${res.status})`;
+        throw new Error(detail);
+      }
+      return data as OrganizationSettings;
+    },
+  },
   integrations: createCrudService<Integration>('integrations'),
   roles: createCrudService<Role>('roles'),
   permissions: createCrudService<Permission>('permissions'),

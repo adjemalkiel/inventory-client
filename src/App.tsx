@@ -18,6 +18,7 @@ import EditStoragePage from './pages/EditStoragePage';
 import AlertsPage from './pages/AlertsPage';
 import ReportsPage from './pages/ReportsPage';
 import AuditsPage from './pages/AuditsPage';
+import ActivityLogPage from './pages/ActivityLogPage';
 import AIAssistantPage from './pages/AIAssistantPage';
 import UsersPage from './pages/UsersPage';
 import SettingsPage from './pages/SettingsPage';
@@ -85,6 +86,14 @@ export default function App() {
               }
             />
             <Route path="/audits" element={<AuditsPage />} />
+            <Route
+              path="/activity-log"
+              element={
+                <RequirePermission anyOf={['settings.manage', 'reports.financial']}>
+                  <ActivityLogPage />
+                </RequirePermission>
+              }
+            />
             <Route path="/ai-assistant" element={<AIAssistantPage />} />
             <Route
               path="/users"

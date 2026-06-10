@@ -138,6 +138,9 @@ export interface StorageLocationZonesResponse {
 
 export interface UnitOfMeasure extends ApiAudit {
   name: string;
+  symbol: string;
+  description: string;
+  is_active: boolean;
 }
 
 export interface Category extends ApiAudit {
@@ -635,6 +638,16 @@ export interface OrganizationSettings extends ApiAudit {
   stock_valuation_method: StockValuationMethod;
   default_currency: string;
   vat_rate_percent: string;
+  /** Section 10 — profil entreprise. */
+  company_name: string;
+  company_logo: string | null;
+  company_address: string;
+  company_city: string;
+  company_country: string;
+  company_phone: string;
+  company_email: string;
+  company_website: string;
+  company_tax_id: string;
 }
 
 export interface Integration extends ApiAudit {
@@ -851,4 +864,40 @@ export interface SendReportEmailResult {
   sent: boolean;
   delivery_kind: string;
   recipient: string;
+}
+
+// ── Section 10 — Seuils d'approbation ─────────────────────────────
+export type ApprovalMovementScope = 'all' | 'sortie' | 'transfert' | 'ajustement';
+
+export interface ApprovalThreshold {
+  id: UUID;
+  label: string;
+  movement_scope: ApprovalMovementScope;
+  movement_scope_label: string;
+  min_amount: string | null;
+  max_amount: string | null;
+  required_role_code: string;
+  is_active: boolean;
+  order: number;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+// ── Section 10 — Journal d'activité ───────────────────────────────
+export type ActivityEventType = 'movement' | 'item' | 'project' | 'user';
+
+export interface ActivityEventItem {
+  type: ActivityEventType;
+  action: string;
+  label: string;
+  detail: string;
+  ref: string;
+  object_id: UUID;
+  actor: string;
+  timestamp: ISODateTime;
+}
+
+export interface ActivityLogResponse {
+  count: number;
+  results: ActivityEventItem[];
 }

@@ -13,6 +13,7 @@ import {
   Settings,
   HardHat,
   FileBarChart2,
+  History,
   X
 } from 'lucide-react';
 import { useCurrentUser } from '@/context/CurrentUserContext';
@@ -47,6 +48,7 @@ const systemItems: {
   { icon: Bot, label: 'Assistant IA', path: '/ai-assistant' },
   { icon: Users, label: 'Utilisateurs', path: '/users', anyOf: ['users.view', 'users.manage'] },
   { icon: Settings, label: 'Paramètres', path: '/settings', anyOf: ['settings.manage'] },
+  { icon: History, label: 'Journal', path: '/activity-log', anyOf: ['settings.manage', 'reports.financial'] },
 ];
 
 interface SidebarProps {
